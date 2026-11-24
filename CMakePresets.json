@@ -1,0 +1,22 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "clang-cxx26",
+      "displayName": "Clang 21 / C++26 / Release",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build-clang",
+      "cacheVariables": {
+        "CMAKE_CXX_COMPILER": "clang++",
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "clang-cxx26",
+      "configurePreset": "clang-cxx26",
+      "jobs": 8
+    }
+  ]
+}

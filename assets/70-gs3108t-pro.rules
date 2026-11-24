@@ -1,0 +1,2 @@
+# GANSS GS3108T-PRO (05ac:024f): allow the desktop user to access hidraw nodes
+KERNEL=="hidraw*", ATTRS{idVendor}=="05ac", ATTRS{idProduct}=="024f", MODE="0660", GROUP="plugdev", TAG+="uaccess"
