@@ -974,7 +974,7 @@ void AboutPage::buildUi()
         {QStringLiteral("USB 有线 / 2.4G 无线自动识别"), QStringLiteral("已支持"), true},
         {QStringLiteral("2.4G 灯效写入"), QStringLiteral("实测通过"), true},
         {QStringLiteral("用户灯光 / 自定义灯光（逐键 RGB）"), QStringLiteral("逆向中"), false},
-        {QStringLiteral("TFT GIF、宏、按键映射"), QStringLiteral("待开始"), false}
+        {QStringLiteral("TFT GIF"), QStringLiteral("待开始"), false}
     };
 
     for (const Feature &feature : items) {
