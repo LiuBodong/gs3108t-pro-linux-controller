@@ -64,7 +64,7 @@ TitleBar::TitleBar(QWidget *parent)
     layout->addWidget(brand, 0, Qt::AlignVCenter);
 
     auto *sub = new QLabel(QStringLiteral("控制中心"));
-    sub->setFont(Theme::uiFont(12));
+    sub->setFont(Theme::uiFont(13));
     sub->setStyleSheet(QStringLiteral("color: #5E697C;"));
     layout->addWidget(sub, 0, Qt::AlignVCenter);
 
@@ -121,14 +121,6 @@ Sidebar::Sidebar(KeyboardController *controller, QWidget *parent)
     layout->setContentsMargins(14, 14, 14, 14);
     layout->setSpacing(4);
 
-    auto *section = new QLabel(QStringLiteral("控制"));
-    QFont sectionFont = Theme::uiFont(10);
-    sectionFont.setLetterSpacing(QFont::AbsoluteSpacing, 1.2);
-    section->setFont(sectionFont);
-    section->setStyleSheet(QStringLiteral("color: #5E697C;"));
-    section->setContentsMargins(12, 6, 0, 2);
-    layout->addWidget(section);
-
     struct NavItem {
         const char *icon;
         const char *label;
@@ -173,10 +165,10 @@ Sidebar::Sidebar(KeyboardController *controller, QWidget *parent)
     auto *texts = new QVBoxLayout;
     texts->setSpacing(1);
     m_deviceTitle = new QLabel;
-    m_deviceTitle->setFont(Theme::uiFont(12, QFont::DemiBold));
+    m_deviceTitle->setFont(Theme::uiFont(13, QFont::DemiBold));
     m_deviceTitle->setStyleSheet(QStringLiteral("color: #F4F7FC;"));
     m_deviceSub = new QLabel;
-    m_deviceSub->setFont(Theme::monoFont(9));
+    m_deviceSub->setFont(Theme::monoFont(11));
     m_deviceSub->setStyleSheet(QStringLiteral("color: #5E697C;"));
     texts->addWidget(m_deviceTitle);
     texts->addWidget(m_deviceSub);
@@ -188,9 +180,9 @@ Sidebar::Sidebar(KeyboardController *controller, QWidget *parent)
 
     layout->addWidget(deviceCard);
 
-    auto *version = new QLabel(QStringLiteral("v0.1.0"));
+    auto *version = new QLabel(QStringLiteral("v0.2.0"));
     version->setAlignment(Qt::AlignHCenter);
-    version->setFont(Theme::monoFont(9));
+    version->setFont(Theme::monoFont(11));
     version->setStyleSheet(QStringLiteral("color: #5E697C;"));
     version->setContentsMargins(0, 4, 0, 0);
     layout->addWidget(version);
@@ -313,7 +305,7 @@ void MainWindow::buildUi()
     m_pageTitle->setStyleSheet(QStringLiteral("color: #F4F7FC;"));
     m_pageSubtitle = new QLabel;
     m_pageSubtitle->setObjectName(QStringLiteral("pageSubtitle"));
-    m_pageSubtitle->setFont(Theme::uiFont(12));
+    m_pageSubtitle->setFont(Theme::uiFont(13));
     m_pageSubtitle->setStyleSheet(QStringLiteral("color: #8B95A9;"));
     titles->addWidget(m_pageTitle);
     titles->addWidget(m_pageSubtitle);
@@ -394,13 +386,13 @@ void MainWindow::setPage(int index)
         QStringLiteral("关于")
     };
     static const QStringList subtitles = {
-        QStringLiteral("实时调整键盘背光，USB 与 2.4G 双通道"),
-        QStringLiteral("逐键 RGB，自定义多组键盘灯效"),
-        QStringLiteral("把系统时间写入键盘 TFT 屏的 RTC"),
+        QStringLiteral("实时调整键盘背光"),
+        QStringLiteral("逐键 RGB 与多组方案"),
+        QStringLiteral("把系统时间写入键盘 TFT 屏"),
         QStringLiteral("把 GIF 动画写进键盘的 TFT 屏"),
         QStringLiteral("按键响应、休眠时间与禁用组合键"),
-        QStringLiteral("查看 HID 接口、连接方式与权限"),
-        QStringLiteral("版本信息、协议摘要与功能进度")
+        QStringLiteral("连接方式与 HID 接口"),
+        QStringLiteral("版本信息与功能进度")
     };
 
     index = qBound(0, index, titles.size() - 1);
@@ -458,7 +450,7 @@ void MainWindow::resizeEvent(QResizeEvent *event)
 {
     QWidget::resizeEvent(event);
     if (m_toast && m_toast->isVisible()) {
-        m_toast->move(width() - m_toast->width() - 26,
+        m_toast->move((width() - m_toast->width()) / 2,
                       height() - m_toast->height() - 26);
     }
     if (m_sizeGrip)

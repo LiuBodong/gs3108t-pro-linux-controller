@@ -65,11 +65,6 @@ QFrame *makeDivider()
     return line;
 }
 
-QString modeName(int mode)
-{
-    return LightModes::name(mode);
-}
-
 } // namespace
 
 PageScroll::PageScroll(QWidget *parent)
@@ -122,9 +117,7 @@ void LightPage::buildUi()
 
     auto *chips = new QHBoxLayout;
     chips->setSpacing(8);
-    m_modeChip = makeChip(QStringLiteral("MODE %1 · %2")
-                              .arg(m_mode)
-                              .arg(LightModes::name(m_mode)));
+    m_modeChip = makeChip(LightModes::name(m_mode));
     m_hexChip = makeChip(QStringLiteral("#FF3B30"));
     m_brightnessChip = makeChip(QStringLiteral("亮度 5"));
     m_speedChip = makeChip(QStringLiteral("速度 3"));
@@ -141,9 +134,6 @@ void LightPage::buildUi()
     title->setMinimumHeight(84);
     left->addWidget(title);
 
-    m_heroSubtitle = makeLabel(QStringLiteral("当前：呼吸 · #FF3B30"),
-                               QStringLiteral("muted"));
-    left->addWidget(m_heroSubtitle);
     left->addStretch();
 
     auto *leftWidget = new QWidget;
@@ -165,8 +155,6 @@ void LightPage::buildUi()
     auto *modeHeader = new QHBoxLayout;
     modeHeader->addWidget(makeLabel(QStringLiteral("灯光模式"), QStringLiteral("cardTitle")));
     modeHeader->addStretch();
-    modeHeader->addWidget(makeLabel(QStringLiteral("点击选择，应用后生效"),
-                                    QStringLiteral("muted")));
     modeCard->body()->addLayout(modeHeader);
 
     auto *grid = new QGridLayout;
@@ -184,13 +172,6 @@ void LightPage::buildUi()
         m_modeChips.append(chip);
     }
     modeCard->body()->addLayout(grid);
-    modeCard->body()->addWidget(makeDivider());
-
-    auto *note = makeLabel(
-        QStringLiteral("编号即固件模式号，已逐项实测校准（11 随波逐流、8 光谱循环、2 单点亮）。开关类模式对颜色不敏感。"),
-        QStringLiteral("tiny"));
-    note->setWordWrap(true);
-    modeCard->body()->addWidget(note);
     modeCard->body()->addStretch();
 
     auto *controlsCard = new CardFrame;
@@ -262,16 +243,6 @@ void LightPage::buildUi()
 
     controlsCard->body()->addStretch();
 
-    auto *hint = makeLabel(QStringLiteral("USB 与 2.4G 灯效均已实测通过。"),
-                           QStringLiteral("tiny"));
-    hint->setWordWrap(true);
-    controlsCard->body()->addWidget(hint);
-
-    auto *columns = new QHBoxLayout;
-    columns->setSpacing(18);
-    columns->addWidget(modeCard, 3);
-    columns->addWidget(controlsCard, 2);
-
     auto *presetCard = new CardFrame;
     auto *presetHeader = new QHBoxLayout;
     presetHeader->addWidget(makeLabel(QStringLiteral("我的专属配置"),
@@ -288,9 +259,19 @@ void LightPage::buildUi()
     m_presetList->setSpacing(8);
     presetCard->body()->addLayout(m_presetList);
 
+    auto *leftColumn = new QVBoxLayout;
+    leftColumn->setSpacing(18);
+    leftColumn->addWidget(modeCard);
+    leftColumn->addWidget(presetCard);
+    leftColumn->addStretch();
+
+    auto *columns = new QHBoxLayout;
+    columns->setSpacing(18);
+    columns->addLayout(leftColumn, 3);
+    columns->addWidget(controlsCard, 2);
+
     contentLayout()->addWidget(hero);
     contentLayout()->addLayout(columns);
-    contentLayout()->addWidget(presetCard);
     contentLayout()->addStretch();
 
     m_presets = PresetStore::load();
@@ -308,16 +289,6 @@ void LightPage::buildUi()
     m_applyButton->setGraphicsEffect(glow);
     m_applyButton->raise();
 
-    m_footerLine = new QFrame(this);
-    m_footerLine->setFrameShape(QFrame::NoFrame);
-    m_footerLine->setStyleSheet(QStringLiteral("background-color: #1C2331;"));
-    m_footerInfo = new QLabel(this);
-    m_footerInfo->setFont(Theme::monoFont(11));
-    m_footerInfo->setStyleSheet(QStringLiteral("color: #5E697C;"));
-    m_footerInfo->setAlignment(Qt::AlignVCenter | Qt::AlignLeft);
-    m_footerLine->raise();
-    m_footerInfo->raise();
-
     auto updateEnabled = [this]() {
         const bool enabled = m_controller->connected() && !m_controller->busy();
         m_applyButton->setEnabled(enabled);
@@ -332,16 +303,8 @@ void LightPage::resizeEvent(QResizeEvent *event)
 {
     PageScroll::resizeEvent(event);
     if (m_applyButton) {
-        if (m_footerLine)
-            m_footerLine->setGeometry(0, height() - 64, width() - 12, 1);
-        if (m_footerInfo)
-            m_footerInfo->setGeometry(4, height() - 56, width() - 230, 48);
         m_applyButton->move(width() - m_applyButton->width() - 26,
                             height() - 56);
-        if (m_footerLine)
-            m_footerLine->raise();
-        if (m_footerInfo)
-            m_footerInfo->raise();
         m_applyButton->raise();
     }
 }
@@ -380,28 +343,14 @@ void LightPage::updateColorUi()
         m_hex->setText(Theme::hex(color));
     }
 
-    m_modeChip->setText(QStringLiteral("MODE %1 · %2")
-                            .arg(m_mode)
-                            .arg(LightModes::name(m_mode)));
+    m_modeChip->setText(LightModes::name(m_mode));
     m_modeChip->setStyleSheet(
-        QStringLiteral("background-color: %1; border: 1px solid %2; border-radius: 12px; "
-                       "padding: 4px 10px; color: %3; font-family: \"Maple Mono NF CN\"; "
-                       "font-size: 11px;")
+        QStringLiteral("background-color: %1; border: 1px solid %2; border-radius: 13px; "
+                       "padding: 5px 12px; color: %3; font-size: 12px;")
             .arg(Theme::rgba(color, 36), Theme::hex(color), Theme::hex(color)));
     m_hexChip->setText(Theme::hex(color));
     m_brightnessChip->setText(QStringLiteral("亮度 %1").arg(m_brightness));
     m_speedChip->setText(QStringLiteral("速度 %1").arg(m_speed));
-    m_heroSubtitle->setText(QStringLiteral("当前：%1 · %2")
-                                .arg(modeName(m_mode), Theme::hex(color)));
-    if (m_footerInfo) {
-        m_footerInfo->setText(
-            QStringLiteral("MODE %1 %2  ·  %3  ·  亮度 %4  ·  速度 %5")
-                .arg(m_mode)
-                .arg(modeName(m_mode))
-                .arg(Theme::hex(color))
-                .arg(m_brightness)
-                .arg(m_speed));
-    }
 }
 
 void LightPage::applyHex()
@@ -441,7 +390,7 @@ void LightPage::refreshPresetList()
 
     if (m_presets.isEmpty()) {
         auto *empty = makeLabel(
-            QStringLiteral("还没有保存的配置。调好模式、颜色和参数后，点右上角「保存当前设置」。"),
+            QStringLiteral("调好灯效后点「保存当前设置」，这里会列出你的配置。"),
             QStringLiteral("muted"));
         empty->setWordWrap(true);
         m_presetList->addWidget(empty);
@@ -467,13 +416,12 @@ void LightPage::refreshPresetList()
         texts->setSpacing(1);
         texts->addWidget(makeLabel(preset.name, QStringLiteral("presetTitle")));
         texts->addWidget(makeLabel(
-            QStringLiteral("MODE %1 %2  ·  亮度 %3  ·  速度 %4%5")
-                .arg(preset.mode)
+            QStringLiteral("%1  ·  亮度 %2  ·  速度 %3%4")
                 .arg(LightModes::name(preset.mode))
                 .arg(preset.brightness)
                 .arg(preset.speed)
                 .arg(preset.colorful ? QStringLiteral("  ·  多彩") : QString()),
-            QStringLiteral("tiny")));
+            QStringLiteral("muted")));
         layout->addLayout(texts, 1);
 
         auto *applyButton = new QPushButton(QStringLiteral("应用"), row);
@@ -590,7 +538,7 @@ void UserLightPage::buildUi()
 {
     auto *hero = new CardFrame;
     hero->setObjectName(QStringLiteral("hero"));
-    hero->setMinimumHeight(180);
+    hero->setMinimumHeight(210);
 
     auto *heroRow = new QHBoxLayout;
     heroRow->setSpacing(18);
@@ -609,13 +557,8 @@ void UserLightPage::buildUi()
     title->setMinimumHeight(84);
     texts->addWidget(title);
 
-    auto *subtitle = makeLabel(
-        QStringLiteral("点击或框选键盘上的按键，选好颜色后写入键盘。"
-                       "写入后键盘进入实时灯光模式；按 FN+(-) 或 FN+(+) 会回到键盘自己的灯效，"
-                       "再点一次「写入键盘」即可恢复。"),
-        QStringLiteral("muted"));
-    subtitle->setWordWrap(true);
-    texts->addWidget(subtitle);
+    texts->addWidget(makeLabel(QStringLiteral("点选或框选按键，右侧选色，写入键盘。"),
+                               QStringLiteral("muted")));
     texts->addStretch();
 
     auto *left = new QWidget;
@@ -639,6 +582,9 @@ void UserLightPage::buildUi()
     boardHeader->addWidget(makeLabel(QStringLiteral("逐键颜色"), QStringLiteral("cardTitle")));
     boardHeader->addSpacing(6);
     boardHeader->addStretch();
+
+    m_selection = makeLabel(QStringLiteral("未选择按键"), QStringLiteral("muted"));
+    boardHeader->addWidget(m_selection);
 
     auto *selectAllButton = new QPushButton(QStringLiteral("全选"), this);
     selectAllButton->setObjectName(QStringLiteral("ghost"));
@@ -678,27 +624,17 @@ void UserLightPage::buildUi()
     boardCard->body()->addLayout(slotRow);
 
     m_board = new PerKeyBoard;
+    m_board->setMinimumHeight(300);
+    m_board->setToolTip(QStringLiteral("拖动框选，按住 Ctrl 点击多选"));
     connect(m_board, &PerKeyBoard::selectionChanged,
             this, &UserLightPage::refreshSelection);
     boardCard->body()->addWidget(m_board);
-
-    auto *boardFooter = new QHBoxLayout;
-    m_selection = makeLabel(QStringLiteral("未选择按键"), QStringLiteral("muted"));
-    boardFooter->addWidget(m_selection, 1);
-    auto *hint = makeLabel(
-        QStringLiteral("拖动可框选；按住 Ctrl 点击可多选。每个方案是一组本地配置，写入时只支持 USB 有线。"),
-        QStringLiteral("tiny"));
-    hint->setWordWrap(true);
-    boardFooter->addWidget(hint, 0, Qt::AlignRight);
-    boardCard->body()->addLayout(boardFooter);
     contentLayout()->addWidget(boardCard);
 
     auto *colorCard = new CardFrame;
     auto *colorHeader = new QHBoxLayout;
     colorHeader->addWidget(makeLabel(QStringLiteral("颜色"), QStringLiteral("cardTitle")));
     colorHeader->addStretch();
-    colorHeader->addWidget(makeLabel(QStringLiteral("选色后自动刷到选中的按键"),
-                                     QStringLiteral("muted")));
     colorCard->body()->addLayout(colorHeader);
 
     auto *colorRow = new QHBoxLayout;
@@ -1057,50 +993,28 @@ void ClockPage::buildUi()
     hero->body()->addStretch();
 
     auto *syncCard = new CardFrame;
-    syncCard->body()->addWidget(makeLabel(QStringLiteral("同步到键盘"),
-                                          QStringLiteral("cardTitle")));
-    auto *description = makeLabel(
-        QStringLiteral("把当前系统时间写入键盘 TFT 屏的 RTC。USB 与 2.4G 都支持，发送后键盘屏幕上的时间会立即更新。"),
-        QStringLiteral("muted"));
-    description->setWordWrap(true);
-    syncCard->body()->addWidget(description);
+    auto *syncRow = new QHBoxLayout;
+    syncRow->setSpacing(18);
+
+    auto *syncTexts = new QVBoxLayout;
+    syncTexts->setSpacing(4);
+    syncTexts->addWidget(makeLabel(QStringLiteral("同步到键盘"), QStringLiteral("cardTitle")));
+    m_status = makeLabel(QStringLiteral("USB 与 2.4G 均可同步"), QStringLiteral("muted"));
+    m_status->setWordWrap(true);
+    syncTexts->addWidget(m_status);
+    syncRow->addLayout(syncTexts, 1);
 
     m_syncButton = new QPushButton(QStringLiteral("同步当前时间"));
     m_syncButton->setObjectName(QStringLiteral("sync"));
-    m_syncButton->setMinimumHeight(46);
+    m_syncButton->setFixedSize(220, 50);
     m_syncButton->setCursor(Qt::PointingHandCursor);
     connect(m_syncButton, &QPushButton::clicked, m_controller, &KeyboardController::syncClock);
-    syncCard->body()->addWidget(m_syncButton);
+    syncRow->addWidget(m_syncButton, 0, Qt::AlignVCenter);
 
-    m_status = makeLabel(QStringLiteral("提示：首次使用建议先确认 /dev/hidraw 权限。"),
-                         QStringLiteral("tiny"));
-    m_status->setWordWrap(true);
-    syncCard->body()->addWidget(m_status);
-    syncCard->body()->addStretch();
-
-    auto *protocolCard = new CardFrame;
-    protocolCard->body()->addWidget(makeLabel(QStringLiteral("协议说明"),
-                                              QStringLiteral("cardTitle")));
-    auto *protocol = makeLabel(
-        QStringLiteral("USB：4 个 65 字节 Feature 包（04 18 → 04 28 → 时间 → 04 02）。\n"
-                       "2.4G：1 个 33 字节 Output 包（0C 10 + 时间 + AA55 + 校验和）。"),
-        QStringLiteral("muted"));
-    protocol->setWordWrap(true);
-    protocolCard->body()->addWidget(protocol);
-    protocolCard->body()->addWidget(makeDivider());
-    auto *verified = makeLabel(QStringLiteral("校时协议已在 USB 与 2.4G 两种模式下实测通过。"),
-                               {}, 11, Theme::Success);
-    verified->setWordWrap(true);
-    protocolCard->body()->addWidget(verified);
-    protocolCard->body()->addStretch();
-
-    auto *columns = new QHBoxLayout;
-    columns->setSpacing(18);
-    columns->addWidget(syncCard, 3);
-    columns->addWidget(protocolCard, 2);
+    syncCard->body()->addLayout(syncRow);
 
     contentLayout()->addWidget(hero);
-    contentLayout()->addLayout(columns);
+    contentLayout()->addWidget(syncCard);
     contentLayout()->addStretch();
 
     auto updateState = [this]() {
@@ -1147,6 +1061,7 @@ GifPage::GifPage(KeyboardController *controller, QWidget *parent)
             [this](int percent) { m_progress->setValue(percent); });
     connect(m_controller, &KeyboardController::gifUploaded, this,
             [this](bool ok, const QString &) {
+                m_progress->setVisible(false);
                 if (!ok)
                     m_progress->setValue(0);
                 m_choose->setEnabled(true);
@@ -1157,71 +1072,65 @@ GifPage::GifPage(KeyboardController *controller, QWidget *parent)
 void GifPage::buildUi()
 {
     auto *card = new CardFrame;
-    card->body()->addWidget(makeLabel(QStringLiteral("TFT 动图"),
-                                      QStringLiteral("cardTitle")));
-    auto *hint = makeLabel(
-        QStringLiteral("选择 GIF 或静态图片后会按 240×135 转成 RGB565 写入键盘。"
-                       "动图最多 108 帧，超过的部分会被截断；单张图片按 1 帧处理。"),
-        QStringLiteral("tiny"));
-    hint->setWordWrap(true);
-    card->body()->addWidget(hint);
-    card->body()->addWidget(makeDivider());
 
-    m_preview = new QLabel(QStringLiteral("未选择 GIF"));
-    m_preview->setFixedSize(320, 180);
-    m_preview->setAlignment(Qt::AlignCenter);
-    m_preview->setStyleSheet(
-        QStringLiteral("background-color: #0B0F16; border: 1px solid #1C2331; "
-                       "border-radius: 12px; color: #5E697C;"));
+    auto *header = new QHBoxLayout;
+    header->setSpacing(8);
+    header->addWidget(makeLabel(QStringLiteral("TFT 动图"), QStringLiteral("cardTitle")));
+    header->addStretch();
+    header->addWidget(makeChip(QStringLiteral("240 × 135")));
+    header->addWidget(makeChip(QStringLiteral("最多 108 帧")));
 
-    auto *side = new QVBoxLayout;
-    side->setSpacing(8);
-    m_fileLabel = makeLabel(QStringLiteral("还没有选择文件"), QStringLiteral("mono"));
-    m_fileLabel->setWordWrap(true);
-    m_infoLabel = makeLabel(QString(), QStringLiteral("tiny"));
-    m_infoLabel->setWordWrap(true);
-    m_choose = new QPushButton(QStringLiteral("选择 GIF..."));
+    m_choose = new QPushButton(QStringLiteral("选择图片…"));
     m_choose->setObjectName(QStringLiteral("ghost"));
-    m_choose->setMinimumHeight(38);
     m_choose->setCursor(Qt::PointingHandCursor);
     connect(m_choose, &QPushButton::clicked, this, &GifPage::chooseFile);
-    side->addWidget(m_fileLabel);
-    side->addWidget(m_infoLabel);
-    side->addWidget(m_choose, 0, Qt::AlignLeft);
-    side->addStretch();
+    header->addWidget(m_choose);
 
-    auto *previewRow = new QHBoxLayout;
-    previewRow->setSpacing(18);
-    previewRow->addWidget(m_preview, 0, Qt::AlignTop);
-    previewRow->addLayout(side, 1);
-    card->body()->addLayout(previewRow);
-    contentLayout()->addWidget(card);
+    m_upload = new QPushButton(QStringLiteral("上传到键盘"));
+    m_upload->setObjectName(QStringLiteral("primary"));
+    m_upload->setFixedSize(160, 44);
+    m_upload->setCursor(Qt::PointingHandCursor);
+    connect(m_upload, &QPushButton::clicked, this, &GifPage::upload);
+    header->addWidget(m_upload);
+    card->body()->addLayout(header);
 
-    auto *applyCard = new CardFrame;
-    applyCard->body()->addWidget(makeLabel(QStringLiteral("应用到键盘"),
-                                           QStringLiteral("cardTitle")));
-    m_availability = makeLabel(QString(), QStringLiteral("tiny"));
+    m_preview = new QLabel(QStringLiteral("未选择图片"));
+    m_preview->setFixedSize(380, 214);
+    m_preview->setAlignment(Qt::AlignCenter);
+    m_preview->setFont(Theme::uiFont(13));
+    m_preview->setStyleSheet(
+        QStringLiteral("background-color: #0B0F16; border: 1px solid #1C2331; "
+                       "border-radius: 14px; color: #5E697C;"));
+
+    auto *side = new QVBoxLayout;
+    side->setSpacing(6);
+    m_fileLabel = makeLabel(QStringLiteral("还没有选择文件"), QStringLiteral("mono"));
+    m_fileLabel->setWordWrap(true);
+    m_infoLabel = makeLabel(QString(), QStringLiteral("muted"));
+    m_infoLabel->setWordWrap(true);
+    m_availability = makeLabel(QString(), QStringLiteral("muted"));
     m_availability->setWordWrap(true);
-    applyCard->body()->addWidget(m_availability);
-
     m_progress = new QProgressBar;
     m_progress->setObjectName(QStringLiteral("uploadProgress"));
     m_progress->setRange(0, 100);
     m_progress->setValue(0);
     m_progress->setTextVisible(false);
-    m_progress->setFixedHeight(10);
-    applyCard->body()->addWidget(m_progress);
+    m_progress->setFixedHeight(8);
+    m_progress->setVisible(false);
 
-    auto *row = new QHBoxLayout;
-    row->addStretch();
-    m_upload = new QPushButton(QStringLiteral("上传到键盘"));
-    m_upload->setObjectName(QStringLiteral("primary"));
-    m_upload->setFixedSize(180, 48);
-    m_upload->setCursor(Qt::PointingHandCursor);
-    connect(m_upload, &QPushButton::clicked, this, &GifPage::upload);
-    row->addWidget(m_upload);
-    applyCard->body()->addLayout(row);
-    contentLayout()->addWidget(applyCard);
+    side->addWidget(m_fileLabel);
+    side->addWidget(m_infoLabel);
+    side->addWidget(m_availability);
+    side->addWidget(m_progress);
+    side->addStretch();
+
+    auto *previewRow = new QHBoxLayout;
+    previewRow->setSpacing(22);
+    previewRow->addWidget(m_preview, 0, Qt::AlignTop);
+    previewRow->addLayout(side, 1);
+    card->body()->addLayout(previewRow);
+
+    contentLayout()->addWidget(card);
     contentLayout()->addStretch();
 }
 
@@ -1255,10 +1164,10 @@ void GifPage::loadPreview()
 
     const int count = reader.imageCount();
     const QSize size = reader.size();
-    QString info = count > 1 ? QStringLiteral("帧数 %1").arg(count)
+    QString info = count > 1 ? QStringLiteral("%1 帧").arg(count)
                              : QStringLiteral("单帧图片");
     if (size.isValid())
-        info += QStringLiteral(" · %1×%2").arg(size.width()).arg(size.height());
+        info += QStringLiteral(" · %1 × %2").arg(size.width()).arg(size.height());
     if (count > 108)
         info += QStringLiteral(" · 只上传前 108 帧");
     m_infoLabel->setText(info);
@@ -1290,6 +1199,7 @@ void GifPage::upload()
     m_choose->setEnabled(false);
     m_upload->setEnabled(false);
     m_progress->setValue(0);
+    m_progress->setVisible(true);
     m_controller->uploadGif(m_path);
 }
 
@@ -1304,16 +1214,13 @@ void GifPage::refreshAvailability()
     m_choose->setEnabled(!busy);
 
     if (!connected) {
-        m_availability->setText(QStringLiteral("当前未连接键盘。请插上 USB 线。"));
+        m_availability->setText(QStringLiteral("未连接键盘，请插入 USB 线。"));
         m_availability->setStyleSheet(QStringLiteral("color: #F0A23C;"));
     } else if (wireless) {
-        m_availability->setText(QStringLiteral(
-            "当前连接：2.4G 无线。TFT 动图目前只能通过 USB 有线写入——请插上 USB 线，"
-            "并确认键盘处于有线模式。"));
+        m_availability->setText(QStringLiteral("动图需要 USB 有线写入，请连接 USB 线。"));
         m_availability->setStyleSheet(QStringLiteral("color: #F0A23C;"));
     } else {
-        m_availability->setText(QStringLiteral(
-            "当前连接：USB 有线。上传期间不要拔线；单帧约几秒，108 帧约 4 分钟。"));
+        m_availability->setText(QStringLiteral("USB 有线，可以直接上传。"));
         m_availability->setStyleSheet(QStringLiteral("color: #5FD0A0;"));
     }
 }
@@ -1334,18 +1241,14 @@ void SystemPage::buildUi()
     auto *behaviourCard = new CardFrame;
     behaviourCard->body()->addWidget(makeLabel(QStringLiteral("按键行为"),
                                                QStringLiteral("cardTitle")));
-    behaviourCard->body()->addWidget(makeLabel(
-        QStringLiteral("响应档位越高，键盘去抖时间越短；休眠时间到点后键盘进入省电状态。"),
-        QStringLiteral("tiny")));
     behaviourCard->body()->addWidget(makeDivider());
 
     auto *responseRow = new QHBoxLayout;
     responseRow->setSpacing(14);
     auto *responseTexts = new QVBoxLayout;
     responseTexts->setSpacing(4);
-    responseTexts->addWidget(makeLabel(QStringLiteral("按键响应时间"), {}, 13, Theme::Text));
-    responseTexts->addWidget(makeLabel(QStringLiteral("1 档最稳，5 档最快（约 17ms）。"),
-                                       QStringLiteral("tiny")));
+    responseTexts->addWidget(makeLabel(QStringLiteral("按键响应时间"), {}, 14, Theme::Text));
+    responseTexts->addWidget(makeLabel(QStringLiteral("1 最稳 · 5 最快"), QStringLiteral("muted")));
     responseRow->addLayout(responseTexts, 1);
     m_response = new SegmentedControl({QStringLiteral("1"), QStringLiteral("2"),
                                        QStringLiteral("3"), QStringLiteral("4"),
@@ -1357,12 +1260,7 @@ void SystemPage::buildUi()
 
     auto *sleepRow = new QHBoxLayout;
     sleepRow->setSpacing(14);
-    auto *sleepTexts = new QVBoxLayout;
-    sleepTexts->setSpacing(4);
-    sleepTexts->addWidget(makeLabel(QStringLiteral("键盘休眠时间"), {}, 13, Theme::Text));
-    sleepTexts->addWidget(makeLabel(QStringLiteral("无线模式下建议不要设为「不休眠」，会影响续航。"),
-                                    QStringLiteral("tiny")));
-    sleepRow->addLayout(sleepTexts, 1);
+    sleepRow->addWidget(makeLabel(QStringLiteral("键盘休眠时间"), {}, 14, Theme::Text), 1);
     m_sleep = new SegmentedControl({QStringLiteral("不休眠"), QStringLiteral("1 分钟"),
                                     QStringLiteral("5 分钟"), QStringLiteral("30 分钟")});
     m_sleep->setFixedWidth(360);
@@ -1373,50 +1271,36 @@ void SystemPage::buildUi()
     auto *disableCard = new CardFrame;
     disableCard->body()->addWidget(makeLabel(QStringLiteral("禁用按键"),
                                              QStringLiteral("cardTitle")));
-    disableCard->body()->addWidget(makeLabel(
-        QStringLiteral("直接写进键盘固件，换电脑或换系统后依然生效。"),
-        QStringLiteral("tiny")));
     disableCard->body()->addWidget(makeDivider());
 
-    auto addSwitchRow = [&](const QString &title, const QString &subtitle,
-                            ToggleSwitch **target) {
+    auto addSwitchRow = [&](const QString &title, ToggleSwitch **target) {
         auto *row = new QHBoxLayout;
         row->setSpacing(14);
-        auto *texts = new QVBoxLayout;
-        texts->setSpacing(4);
-        texts->addWidget(makeLabel(title, {}, 13, Theme::Text));
-        texts->addWidget(makeLabel(subtitle, QStringLiteral("tiny")));
-        row->addLayout(texts, 1);
+        row->addWidget(makeLabel(title, {}, 14, Theme::Text), 1);
         auto *toggle = new ToggleSwitch;
         *target = toggle;
         row->addWidget(toggle, 0, Qt::AlignVCenter);
         disableCard->body()->addLayout(row);
-        return row;
     };
 
-    addSwitchRow(QStringLiteral("禁用 Windows 键"),
-                 QStringLiteral("避免游戏中误触 Win 键弹出开始菜单。"), &m_win);
+    addSwitchRow(QStringLiteral("禁用 Windows 键"), &m_win);
     disableCard->body()->addWidget(makeDivider());
-    addSwitchRow(QStringLiteral("禁用 ALT+F4"),
-                 QStringLiteral("阻止用 ALT+F4 关闭当前窗口。"), &m_altf4);
+    addSwitchRow(QStringLiteral("禁用 ALT+F4"), &m_altf4);
     disableCard->body()->addWidget(makeDivider());
-    addSwitchRow(QStringLiteral("禁用 ALT+TAB"),
-                 QStringLiteral("阻止用 ALT+TAB 切换窗口。"), &m_alttab);
+    addSwitchRow(QStringLiteral("禁用 ALT+TAB"), &m_alttab);
     contentLayout()->addWidget(disableCard);
 
     auto *applyCard = new CardFrame;
-    applyCard->body()->addWidget(makeLabel(QStringLiteral("应用到键盘"),
-                                           QStringLiteral("cardTitle")));
-    m_availability = makeLabel(QString(), QStringLiteral("tiny"));
-    m_availability->setWordWrap(true);
-    applyCard->body()->addWidget(m_availability);
-
     auto *applyRow = new QHBoxLayout;
-    applyRow->setSpacing(14);
-    auto *note = makeLabel(QStringLiteral("写入后立即生效，不需要额外保存。"),
-                           QStringLiteral("tiny"));
-    note->setWordWrap(true);
-    applyRow->addWidget(note, 1);
+    applyRow->setSpacing(18);
+    auto *applyTexts = new QVBoxLayout;
+    applyTexts->setSpacing(4);
+    applyTexts->addWidget(makeLabel(QStringLiteral("应用到键盘"), QStringLiteral("cardTitle")));
+    m_availability = makeLabel(QString(), QStringLiteral("muted"));
+    m_availability->setWordWrap(true);
+    applyTexts->addWidget(m_availability);
+    applyTexts->addStretch();
+    applyRow->addLayout(applyTexts, 1);
     m_apply = new QPushButton(QStringLiteral("应用到键盘"));
     m_apply->setObjectName(QStringLiteral("primary"));
     m_apply->setFixedSize(180, 48);
@@ -1430,9 +1314,8 @@ void SystemPage::buildUi()
     dangerCard->body()->addWidget(makeLabel(QStringLiteral("危险操作"),
                                             QStringLiteral("cardTitle")));
     auto *dangerHint = makeLabel(
-        QStringLiteral("「重置键盘」会清空键盘上的用户灯光和自定义灯光数据；"
-                       "「恢复出厂」还会清掉逐键灯光，并把灯效和系统配置恢复默认。"),
-        QStringLiteral("tiny"));
+        QStringLiteral("「重置键盘」清空灯效数据；「恢复出厂」恢复全部默认设置。"),
+        QStringLiteral("muted"));
     dangerHint->setWordWrap(true);
     dangerCard->body()->addWidget(dangerHint);
 
@@ -1492,15 +1375,13 @@ void SystemPage::refreshAvailability()
     m_factoryReset->setEnabled(canWrite);
 
     if (!connected) {
-        m_availability->setText(QStringLiteral("当前未连接键盘。请插上 USB 线，或插入 2.4G 接收器。"));
+        m_availability->setText(QStringLiteral("未连接键盘，请插入 USB 线或 2.4G 接收器。"));
         m_availability->setStyleSheet(QStringLiteral("color: #F0A23C;"));
     } else if (wireless) {
-        m_availability->setText(QStringLiteral(
-            "当前连接：2.4G 无线。系统配置暂时只能通过 USB 有线写入——请插上 USB 线，"
-            "并确认键盘处于有线模式。灯光和校时在 2.4G 下仍然可用。"));
+        m_availability->setText(QStringLiteral("系统配置需要 USB 有线，请连接 USB 线。"));
         m_availability->setStyleSheet(QStringLiteral("color: #F0A23C;"));
     } else {
-        m_availability->setText(QStringLiteral("当前连接：USB 有线。配置会直接写入键盘固件。"));
+        m_availability->setText(QStringLiteral("USB 有线，可以直接写入键盘。"));
         m_availability->setStyleSheet(QStringLiteral("color: #5FD0A0;"));
     }
 }
@@ -1584,12 +1465,7 @@ void DevicePage::buildUi()
 
     auto *modeRow = new QHBoxLayout;
     modeRow->setSpacing(14);
-    auto *modeTexts = new QVBoxLayout;
-    modeTexts->setSpacing(4);
-    modeTexts->addWidget(makeLabel(QStringLiteral("连接方式"), {}, 13, Theme::Text));
-    modeTexts->addWidget(makeLabel(QStringLiteral("自动会优先使用 USB；也可以手动指定。"),
-                                   QStringLiteral("tiny")));
-    modeRow->addLayout(modeTexts, 1);
+    modeRow->addWidget(makeLabel(QStringLiteral("连接方式"), {}, 14, Theme::Text), 1);
 
     m_modeControl = new SegmentedControl(
         {QStringLiteral("自动"), QStringLiteral("USB 有线"), QStringLiteral("2.4G 无线")});
@@ -1606,8 +1482,8 @@ void DevicePage::buildUi()
     headerCard->body()->addLayout(modeRow);
 
     auto *wirelessHint = makeLabel(
-        QStringLiteral("2.4G 模式请先按 FN+4 把键盘切到 2.4G，再按一下按键唤醒；蓝牙模式（FN+5/6/7）暂不支持设置。"),
-        QStringLiteral("tiny"));
+        QStringLiteral("2.4G 需先按 FN+4 切换，再按任意键唤醒；蓝牙暂不支持。"),
+        QStringLiteral("muted"));
     wirelessHint->setWordWrap(true);
     headerCard->body()->addWidget(wirelessHint);
 
@@ -1627,7 +1503,7 @@ void DevicePage::buildUi()
     permissionCard->body()->addWidget(makeLabel(QStringLiteral("权限"),
                                                 QStringLiteral("cardTitle")));
     auto *permissionText = makeLabel(
-        QStringLiteral("普通用户需要能读写 /dev/hidraw*。项目里已经带了一份 udev 规则，安装后重新插拔键盘即可："),
+        QStringLiteral("需要读写 /dev/hidraw*。安装下面的 udev 规则后重新插拔键盘。"),
         QStringLiteral("muted"));
     permissionText->setWordWrap(true);
     permissionCard->body()->addWidget(permissionText);
@@ -1654,11 +1530,6 @@ void DevicePage::buildUi()
     copyRow->addWidget(copyButton, 0, Qt::AlignLeft);
     copyRow->addStretch();
     permissionCard->body()->addLayout(copyRow);
-
-    auto *verify = makeLabel(QStringLiteral("验证：getfacl /dev/hidrawN 应能看到当前用户有 rw- 权限。"),
-                             QStringLiteral("tiny"));
-    verify->setWordWrap(true);
-    permissionCard->body()->addWidget(verify);
 
     contentLayout()->addWidget(permissionCard);
     contentLayout()->addStretch();
@@ -1710,7 +1581,7 @@ void DevicePage::rebuildInterfaceList()
         shown = devices;
 
     if (shown.isEmpty()) {
-        m_listLayout->addWidget(makeLabel(QStringLiteral("没有匹配到 05ac:024f 的 hidraw 接口。"),
+        m_listLayout->addWidget(makeLabel(QStringLiteral("没有找到键盘的 HID 接口。"),
                                           QStringLiteral("muted")));
         m_listLayout->addStretch();
         return;
@@ -1741,7 +1612,7 @@ void DevicePage::rebuildInterfaceList()
         auto *title = makeLabel(device.value(QStringLiteral("type")).toString()
                                     + QStringLiteral("  ·  ")
                                     + device.value(QStringLiteral("node")).toString());
-        title->setFont(Theme::uiFont(12, QFont::DemiBold));
+        title->setFont(Theme::uiFont(13, QFont::DemiBold));
         texts->addWidget(title);
         texts->addWidget(makeLabel(
             QStringLiteral("usage ") + device.value(QStringLiteral("usagePage")).toString()
@@ -1758,8 +1629,8 @@ void DevicePage::rebuildInterfaceList()
             badge->setFixedHeight(24);
             badge->setStyleSheet(
                 QStringLiteral("background-color: #173328; border: 1px solid #2C6A50; "
-                               "border-radius: 12px; color: #3DDC97; padding: 0 10px; "
-                               "font-size: 10px;"));
+                               "border-radius: 12px; color: #3DDC97; padding: 0 11px; "
+                               "font-size: 12px;"));
             layout->addWidget(badge, 0, Qt::AlignVCenter);
         }
 
@@ -1794,11 +1665,9 @@ void AboutPage::buildUi()
     title->setFont(Theme::displayFont(26, QFont::DemiBold));
     texts->addWidget(title);
     texts->addWidget(makeLabel(
-        QStringLiteral("Linux 下的 GANSS GS3108T-PRO 配置工具 · Qt 6 Widgets / C++26"),
+        QStringLiteral("Linux 下的 GANSS GS3108T-PRO 配置工具 · Qt 6 / C++26"),
         QStringLiteral("muted")));
-    texts->addWidget(makeLabel(
-        QStringLiteral("v0.1.0 · 协议来自官方 Windows 驱动的静态逆向"),
-        QStringLiteral("tiny")));
+    texts->addWidget(makeLabel(QStringLiteral("v0.2.0"), QStringLiteral("muted")));
     texts->addStretch();
     row->addLayout(texts, 1);
 
@@ -1846,30 +1715,13 @@ void AboutPage::buildUi()
                 .arg(feature.ok ? Theme::Success.name() : Theme::Warning.name()));
         layout->addWidget(dot);
         layout->addWidget(makeLabel(feature.name), 1);
-        auto *state = makeLabel(feature.state, {}, 11,
+        auto *state = makeLabel(feature.state, {}, 12,
                                 feature.ok ? Theme::Success : Theme::Warning);
         layout->addWidget(state);
 
         features->body()->addWidget(line);
     }
     contentLayout()->addWidget(features);
-
-    auto *protocol = new CardFrame;
-    protocol->body()->addWidget(makeLabel(QStringLiteral("协议摘要"),
-                                          QStringLiteral("cardTitle")));
-    auto *protocolText = makeLabel(
-        QStringLiteral("USB：usage page 0xFF13，64 字节 Feature。灯效为 5 个 65 字节包（04 18 → 04 13 → 数据 → 04 02 → 04 F0）。\n"
-                       "2.4G：usage page 0xFF60，32 字节 Output。灯效为 1 个 33 字节包（05 10 + 数据 + AA55 + 校验和）。"),
-        QStringLiteral("muted"));
-    protocolText->setWordWrap(true);
-    protocol->body()->addWidget(protocolText);
-    protocol->body()->addWidget(makeDivider());
-    auto *files = makeLabel(
-        QStringLiteral("相关文件：GS3108T-PRO-时间同步-协议与实现.md、HID设备驱动逆向方法论-交接文档.md、gs3108_analysis/gskbd-time.py、gs3108_analysis/gskbd-light.py"),
-        QStringLiteral("tiny"));
-    files->setWordWrap(true);
-    protocol->body()->addWidget(files);
-    contentLayout()->addWidget(protocol);
 
     contentLayout()->addStretch();
 }

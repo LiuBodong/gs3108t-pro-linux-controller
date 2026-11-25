@@ -70,10 +70,7 @@ private:
     QLabel *m_hexChip = nullptr;
     QLabel *m_brightnessChip = nullptr;
     QLabel *m_speedChip = nullptr;
-    QLabel *m_heroSubtitle = nullptr;
     QPushButton *m_applyButton = nullptr;
-    QFrame *m_footerLine = nullptr;
-    QLabel *m_footerInfo = nullptr;
     QVBoxLayout *m_presetList = nullptr;
 };
 

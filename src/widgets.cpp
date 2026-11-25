@@ -156,11 +156,11 @@ void StatusChip::setStatus(bool connected, const QString &text, const QString &i
 
 QSize StatusChip::sizeHint() const
 {
-    const QFontMetrics metrics(Theme::uiFont(12));
-    int width = metrics.horizontalAdvance(m_text) + 39;
+    const QFontMetrics metrics(Theme::uiFont(13));
+    int width = metrics.horizontalAdvance(m_text) + 42;
     if (!m_icon.isNull())
-        width += 19;
-    return QSize(qMax(96, width), 34);
+        width += 20;
+    return QSize(qMax(100, width), 36);
 }
 
 void StatusChip::paintEvent(QPaintEvent *event)
@@ -172,7 +172,7 @@ void StatusChip::paintEvent(QPaintEvent *event)
     const QRectF background = QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5);
     painter.setPen(QPen(Theme::Border, 1));
     painter.setBrush(QColor(0x14, 0x1A, 0x25));
-    painter.drawRoundedRect(background, 17, 17);
+    painter.drawRoundedRect(background, 18, 18);
 
     int x = 14;
     QColor dot = m_connected ? Theme::Success : Theme::Danger;
@@ -189,7 +189,7 @@ void StatusChip::paintEvent(QPaintEvent *event)
     }
 
     painter.setPen(Theme::Text);
-    painter.setFont(Theme::uiFont(12));
+    painter.setFont(Theme::uiFont(13));
     painter.drawText(QRectF(x, 0, width() - x - 12, height()),
                      Qt::AlignVCenter | Qt::AlignLeft, m_text);
 }
@@ -200,7 +200,7 @@ ModeChip::ModeChip(int mode, const QString &name, QWidget *parent)
     , m_name(name)
     , m_accent(Theme::Accent)
 {
-    setFixedHeight(74);
+    setFixedHeight(60);
     setMinimumWidth(64);
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     setCursor(Qt::PointingHandCursor);
@@ -222,7 +222,7 @@ void ModeChip::setAccentColor(const QColor &color)
 
 QSize ModeChip::sizeHint() const
 {
-    return QSize(96, 74);
+    return QSize(96, 60);
 }
 
 void ModeChip::paintEvent(QPaintEvent *event)
@@ -244,23 +244,13 @@ void ModeChip::paintEvent(QPaintEvent *event)
 
     painter.setPen(Qt::NoPen);
     painter.setBrush(m_accent);
-    painter.drawEllipse(QPointF(18, 24), 4, 4);
+    painter.drawEllipse(QPointF(17, height() / 2.0), 4, 4);
 
-    painter.setPen(Theme::Text);
-    painter.setFont(Theme::uiFont(13, QFont::DemiBold));
-    painter.drawText(QRectF(28, 12, width() - 38, 20),
-                     Qt::AlignVCenter | Qt::AlignLeft, QString::number(m_index));
-
-    painter.setPen(Theme::TextMuted);
-    painter.setFont(Theme::uiFont(10));
-    painter.drawText(QRectF(16, 44, width() - 28, 16),
+    painter.setPen(m_selected ? Theme::Text : QColor(0xD5, 0xDC, 0xEA));
+    painter.setFont(Theme::uiFont(14, QFont::DemiBold));
+    painter.drawText(QRectF(29, 0, width() - 40, height()),
                      Qt::AlignVCenter | Qt::AlignLeft, m_name);
 
-    if (m_selected) {
-        const QPixmap check = Theme::tintedIcon(QStringLiteral(":/assets/icons/check.svg"),
-                                                m_accent, 12);
-        painter.drawPixmap(QPointF(width() - 20, 8), check);
-    }
 }
 
 void ModeChip::enterEvent(QEnterEvent *event)
@@ -639,12 +629,12 @@ void GlowSlider::paintEvent(QPaintEvent *event)
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing);
 
-    painter.setFont(Theme::uiFont(12));
+    painter.setFont(Theme::uiFont(13));
     painter.setPen(Theme::TextDim);
     painter.drawText(QRectF(0, 0, width() - 40, 18),
                      Qt::AlignVCenter | Qt::AlignLeft, m_label);
 
-    painter.setFont(Theme::uiFont(13, QFont::DemiBold));
+    painter.setFont(Theme::uiFont(14, QFont::DemiBold));
     painter.setPen(Theme::Text);
     painter.drawText(QRectF(width() - 40, 0, 40, 18),
                      Qt::AlignVCenter | Qt::AlignRight, QString::number(m_value));
@@ -1167,7 +1157,7 @@ void Toast::showMessage(const QString &text, bool ok)
     adjustSize();
     resize(sizeHint());
     if (parentWidget()) {
-        move(parentWidget()->width() - width() - 26,
+        move((parentWidget()->width() - width()) / 2,
              parentWidget()->height() - height() - 26);
     }
     show();

@@ -125,7 +125,6 @@ QPixmap tintedIcon(const QString &resource, const QColor &color, int size)
 
     QPixmap source(px, px);
     source.fill(Qt::transparent);
-    source.setDevicePixelRatio(scale);
     {
         QPainter painter(&source);
         painter.setRenderHint(QPainter::Antialiasing);
@@ -134,13 +133,16 @@ QPixmap tintedIcon(const QString &resource, const QColor &color, int size)
 
     QPixmap tinted(px, px);
     tinted.fill(Qt::transparent);
-    tinted.setDevicePixelRatio(scale);
     {
         QPainter painter(&tinted);
         painter.drawPixmap(0, 0, source);
         painter.setCompositionMode(QPainter::CompositionMode_SourceIn);
         painter.fillRect(QRect(0, 0, px, px), color);
     }
+
+    // 绘制完成后再标记 DPR，否则 QPainter 会按逻辑尺寸缩放坐标系，只画出左上角一块。
+    source.setDevicePixelRatio(scale);
+    tinted.setDevicePixelRatio(scale);
     return tinted;
 }
 
