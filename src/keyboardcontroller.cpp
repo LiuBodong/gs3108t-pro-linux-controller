@@ -11,6 +11,8 @@
 
 #include <cstring>
 
+#include "keylayout.h"
+
 static QString joinSizes(const QList<int> &sizes)
 {
     QStringList parts;
@@ -526,6 +528,160 @@ bool KeyboardController::clearLightStoreUsb(int command)
         packet[1] = static_cast<char>(0xF0);
         if (!write(packet, true)) {
             fail(QStringLiteral("保存重置结果：") + error);
+            ok = false;
+        }
+    }
+
+    HidManager::closeDevice(fd);
+    return ok;
+}
+
+bool KeyboardController::applyPerKey(const QVector<QColor> &colors, int slot)
+{
+    if (m_busy)
+        return false;
+
+    setBusy(true);
+    QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+
+    bool ok = false;
+    if (!ensureActive()) {
+        ok = false;
+    } else if (m_active.isWireless()) {
+        fail(QStringLiteral("逐键灯光目前只能通过 USB 有线写入。"
+                            "请插上 USB 线，并确认键盘处于有线模式。"));
+    } else {
+        ok = applyPerKeyUsb(colors, slot);
+    }
+
+    setBusy(false);
+    const QString message = ok
+        ? QStringLiteral("逐键灯光已写入键盘")
+        : (m_lastError.isEmpty() ? QStringLiteral("逐键灯光写入失败") : m_lastError);
+    emit perKeyApplied(ok, message);
+    return ok;
+}
+
+bool KeyboardController::applyPerKeyUsb(const QVector<QColor> &colors, int slot)
+{
+    Q_UNUSED(slot)
+
+    QString error;
+    const int fd = HidManager::openDevice(m_active, &error);
+    if (fd < 0) {
+        fail(error);
+        return false;
+    }
+
+    auto write = [&](const QByteArray &data, bool readback) -> bool {
+        QByteArray reply;
+        return HidManager::sendFeature(fd, data, readback ? &reply : nullptr, &error);
+    };
+
+    bool ok = true;
+    QByteArray packet(64, '\0');
+
+    // 固件只有在实时灯光模式（0x80）下才会显示逐键数据，先切模式再写。
+    packet[0] = 0x04;
+    packet[1] = 0x18;
+    if (!write(packet, true)) {
+        fail(QStringLiteral("进入灯光会话：") + error);
+        ok = false;
+    }
+
+    if (ok) {
+        packet.fill('\0');
+        packet[0] = 0x04;
+        packet[1] = 0x13;
+        packet[8] = 0x01;
+        if (!write(packet, true)) {
+            fail(QStringLiteral("准备切换实时灯光模式：") + error);
+            ok = false;
+        }
+    }
+
+    if (ok) {
+        packet.fill('\0');
+        packet[0] = 0x80;
+        packet[5] = 0x05;
+        packet[9] = static_cast<char>(0xAA);
+        packet[10] = static_cast<char>(0x55);
+        if (!write(packet, false)) {
+            fail(QStringLiteral("切换实时灯光模式：") + error);
+            ok = false;
+        }
+    }
+
+    if (ok) {
+        packet.fill('\0');
+        packet[0] = 0x04;
+        packet[1] = 0x02;
+        if (!write(packet, true)) {
+            fail(QStringLiteral("结束灯光会话：") + error);
+            ok = false;
+        }
+    }
+
+    if (ok) {
+        packet.fill('\0');
+        packet[0] = 0x04;
+        packet[1] = 0xF0;
+        if (!write(packet, true)) {
+            fail(QStringLiteral("保存实时灯光模式：") + error);
+            ok = false;
+        }
+    }
+
+    if (ok) {
+        packet.fill('\0');
+        packet[0] = 0x04;
+        packet[1] = 0x18;
+        if (!write(packet, true)) {
+            fail(QStringLiteral("进入逐键灯光会话：") + error);
+            ok = false;
+        }
+    }
+
+    if (ok) {
+        packet.fill('\0');
+        packet[0] = 0x04;
+        packet[1] = 0x23;
+        packet[2] = 0x00;
+        packet[8] = 0x09;
+        if (!write(packet, true)) {
+            fail(QStringLiteral("准备写入逐键灯光：") + error);
+            ok = false;
+        }
+    }
+
+    if (ok) {
+        QByteArray payload(64 * 9, '\0');
+        for (int i = 0; i < KeyLayout::kRecordCount; ++i) {
+            payload[i * 4] = static_cast<char>(i & 0xFF);
+            const QColor color = i < colors.size() ? colors.at(i) : QColor();
+            if (color.isValid()) {
+                payload[i * 4 + 1] = static_cast<char>(color.red());
+                payload[i * 4 + 2] = static_cast<char>(color.green());
+                payload[i * 4 + 3] = static_cast<char>(color.blue());
+            }
+        }
+        payload[574] = static_cast<char>(0xAA);
+        payload[575] = static_cast<char>(0x55);
+
+        for (int i = 0; i < 9 && ok; ++i) {
+            if (!write(payload.mid(i * 64, 64), false)) {
+                fail(QStringLiteral("写入逐键灯光数据：") + error);
+                ok = false;
+            }
+        }
+    }
+
+    if (ok) {
+        packet.fill('\0');
+        packet[0] = 0x04;
+        packet[1] = 0x02;
+        if (!write(packet, true)) {
+            fail(QStringLiteral("结束逐键灯光会话：") + error);
             ok = false;
         }
     }

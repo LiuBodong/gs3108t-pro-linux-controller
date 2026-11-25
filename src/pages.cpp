@@ -577,6 +577,442 @@ void LightPage::applyPreset(const LightPreset &preset)
     apply();
 }
 
+UserLightPage::UserLightPage(KeyboardController *controller, QWidget *parent)
+    : PageScroll(parent)
+    , m_controller(controller)
+{
+    buildUi();
+    loadSlots();
+    m_board->setColors(m_slots[m_slot]);
+}
+
+void UserLightPage::buildUi()
+{
+    auto *hero = new CardFrame;
+    hero->setObjectName(QStringLiteral("hero"));
+    hero->setMinimumHeight(180);
+
+    auto *heroRow = new QHBoxLayout;
+    heroRow->setSpacing(18);
+
+    auto *texts = new QVBoxLayout;
+    texts->setSpacing(8);
+    auto *chips = new QHBoxLayout;
+    chips->setSpacing(8);
+    chips->addWidget(makeChip(QStringLiteral("PER-KEY RGB")));
+    chips->addWidget(makeChip(QStringLiteral("112 键")));
+    chips->addStretch();
+    texts->addLayout(chips);
+
+    auto *title = makeLabel(QStringLiteral("给每一颗键\n单独上色"), QStringLiteral("heroTitle"));
+    title->setFont(Theme::displayFont(32, QFont::DemiBold));
+    title->setMinimumHeight(84);
+    texts->addWidget(title);
+
+    auto *subtitle = makeLabel(
+        QStringLiteral("点击或框选键盘上的按键，选好颜色后写入键盘。"
+                       "写入后键盘进入实时灯光模式；按 FN+(-) 或 FN+(+) 会回到键盘自己的灯效，"
+                       "再点一次「写入键盘」即可恢复。"),
+        QStringLiteral("muted"));
+    subtitle->setWordWrap(true);
+    texts->addWidget(subtitle);
+    texts->addStretch();
+
+    auto *left = new QWidget;
+    left->setLayout(texts);
+    left->setMinimumWidth(360);
+    left->setMaximumWidth(560);
+
+    auto *art = new QLabel;
+    art->setAlignment(Qt::AlignCenter);
+    art->setPixmap(Theme::tintedIcon(QStringLiteral(":/assets/icons/keyboard.svg"), m_color, 110));
+    art->setMinimumWidth(140);
+
+    heroRow->addWidget(left, 1);
+    heroRow->addWidget(art, 0);
+    hero->body()->addLayout(heroRow);
+    contentLayout()->addWidget(hero);
+
+    auto *boardCard = new CardFrame;
+    auto *boardHeader = new QHBoxLayout;
+    boardHeader->setSpacing(10);
+    boardHeader->addWidget(makeLabel(QStringLiteral("逐键颜色"), QStringLiteral("cardTitle")));
+    boardHeader->addSpacing(6);
+    boardHeader->addStretch();
+
+    auto *selectAllButton = new QPushButton(QStringLiteral("全选"), this);
+    selectAllButton->setObjectName(QStringLiteral("ghost"));
+    selectAllButton->setCursor(Qt::PointingHandCursor);
+    connect(selectAllButton, &QPushButton::clicked, this, [this]() {
+        m_board->selectAll();
+    });
+    boardHeader->addWidget(selectAllButton);
+
+    auto *clearSelectionButton = new QPushButton(QStringLiteral("清空选择"), this);
+    clearSelectionButton->setObjectName(QStringLiteral("ghost"));
+    clearSelectionButton->setCursor(Qt::PointingHandCursor);
+    connect(clearSelectionButton, &QPushButton::clicked, this, [this]() {
+        m_board->clearSelection();
+    });
+    boardHeader->addWidget(clearSelectionButton);
+    boardCard->body()->addLayout(boardHeader);
+
+    auto *slotRow = new QHBoxLayout;
+    slotRow->setSpacing(6);
+    m_slotTabs = new QHBoxLayout;
+    m_slotTabs->setSpacing(6);
+    slotRow->addLayout(m_slotTabs);
+    slotRow->addStretch();
+
+    auto *addSlotButton = new QPushButton(QStringLiteral("+ 新建方案"), this);
+    addSlotButton->setObjectName(QStringLiteral("ghost"));
+    addSlotButton->setCursor(Qt::PointingHandCursor);
+    connect(addSlotButton, &QPushButton::clicked, this, &UserLightPage::addSlot);
+    slotRow->addWidget(addSlotButton);
+
+    auto *removeSlotButton = new QPushButton(QStringLiteral("删除方案"), this);
+    removeSlotButton->setObjectName(QStringLiteral("ghost"));
+    removeSlotButton->setCursor(Qt::PointingHandCursor);
+    connect(removeSlotButton, &QPushButton::clicked, this, &UserLightPage::removeSlot);
+    slotRow->addWidget(removeSlotButton);
+    boardCard->body()->addLayout(slotRow);
+
+    m_board = new PerKeyBoard;
+    connect(m_board, &PerKeyBoard::selectionChanged,
+            this, &UserLightPage::refreshSelection);
+    boardCard->body()->addWidget(m_board);
+
+    auto *boardFooter = new QHBoxLayout;
+    m_selection = makeLabel(QStringLiteral("未选择按键"), QStringLiteral("muted"));
+    boardFooter->addWidget(m_selection, 1);
+    auto *hint = makeLabel(
+        QStringLiteral("拖动可框选；按住 Ctrl 点击可多选。每个方案是一组本地配置，写入时只支持 USB 有线。"),
+        QStringLiteral("tiny"));
+    hint->setWordWrap(true);
+    boardFooter->addWidget(hint, 0, Qt::AlignRight);
+    boardCard->body()->addLayout(boardFooter);
+    contentLayout()->addWidget(boardCard);
+
+    auto *colorCard = new CardFrame;
+    auto *colorHeader = new QHBoxLayout;
+    colorHeader->addWidget(makeLabel(QStringLiteral("颜色"), QStringLiteral("cardTitle")));
+    colorHeader->addStretch();
+    colorHeader->addWidget(makeLabel(QStringLiteral("选色后自动刷到选中的按键"),
+                                     QStringLiteral("muted")));
+    colorCard->body()->addLayout(colorHeader);
+
+    auto *colorRow = new QHBoxLayout;
+    colorRow->setSpacing(24);
+
+    m_wheel = new ColorWheel;
+    m_wheel->setFixedSize(190, 190);
+    colorRow->addWidget(m_wheel, 0, Qt::AlignTop);
+
+    auto *colorTexts = new QVBoxLayout;
+    colorTexts->setSpacing(10);
+    auto *hexRow = new QHBoxLayout;
+    hexRow->setSpacing(10);
+    m_swatch = new QLabel;
+    m_swatch->setFixedSize(36, 36);
+    hexRow->addWidget(m_swatch);
+    m_hex = new QLineEdit;
+    m_hex->setPlaceholderText(QStringLiteral("#RRGGBB"));
+    hexRow->addWidget(m_hex, 1);
+    connect(m_hex, &QLineEdit::editingFinished, this, &UserLightPage::applyHex);
+    colorTexts->addLayout(hexRow);
+
+    auto *quickRow = new QHBoxLayout;
+    quickRow->setSpacing(6);
+    const QVector<QColor> quickColors = {
+        QColor(0xFF, 0x3B, 0x30), QColor(0xFF, 0x95, 0x00), QColor(0xFF, 0xCC, 0x00),
+        QColor(0x34, 0xC7, 0x59), QColor(0x32, 0xAD, 0xE6), QColor(0x0A, 0x84, 0xFF),
+        QColor(0xAF, 0x52, 0xDE), QColor(0xFF, 0x2D, 0x55), QColor(0xFF, 0xFF, 0xFF)
+    };
+    for (const QColor &quick : quickColors) {
+        auto *button = new QPushButton(this);
+        button->setFixedSize(26, 26);
+        button->setCursor(Qt::PointingHandCursor);
+        button->setToolTip(Theme::hex(quick));
+        button->setStyleSheet(
+            QStringLiteral("QPushButton { background-color: %1; border: 1px solid rgba(255, 255, 255, 70); "
+                           "border-radius: 13px; } "
+                           "QPushButton:hover { border: 2px solid #FFFFFF; }")
+                .arg(Theme::hex(quick)));
+        connect(button, &QPushButton::clicked, this, [this, quick]() {
+            m_color = quick;
+            qreal hue = quick.hsvHueF();
+            if (hue < 0.0)
+                hue = 0.0;
+            m_wheel->setHsv(hue, quick.hsvSaturationF(), 1.0);
+            if (m_board->hasSelection())
+                m_board->paintSelected(m_color);
+            updateColorUi();
+        });
+        quickRow->addWidget(button);
+    }
+    quickRow->addStretch();
+    colorTexts->addLayout(quickRow);
+
+    auto *applySelection = new QPushButton(QStringLiteral("应用到选中的按键"), this);
+    applySelection->setObjectName(QStringLiteral("ghost"));
+    applySelection->setCursor(Qt::PointingHandCursor);
+    connect(applySelection, &QPushButton::clicked, this, [this]() {
+        m_board->paintSelected(m_color);
+    });
+    colorTexts->addWidget(applySelection);
+
+    auto *clearAll = new QPushButton(QStringLiteral("把所有键恢复为不亮"), this);
+    clearAll->setObjectName(QStringLiteral("ghost"));
+    clearAll->setCursor(Qt::PointingHandCursor);
+    connect(clearAll, &QPushButton::clicked, this, &UserLightPage::clearBoard);
+    colorTexts->addWidget(clearAll);
+    colorTexts->addStretch();
+    colorRow->addLayout(colorTexts, 1);
+    colorCard->body()->addLayout(colorRow);
+    contentLayout()->addWidget(colorCard);
+
+    auto *footer = new QWidget;
+    auto *footerRow = new QHBoxLayout(footer);
+    footerRow->setContentsMargins(0, 0, 0, 0);
+    m_status = makeLabel(QStringLiteral("选好颜色后点右侧按钮写入键盘"), QStringLiteral("muted"));
+    footerRow->addWidget(m_status, 1);
+    m_apply = new QPushButton(QStringLiteral("写入键盘"), footer);
+    m_apply->setObjectName(QStringLiteral("primary"));
+    m_apply->setFixedSize(180, 48);
+    m_apply->setCursor(Qt::PointingHandCursor);
+    connect(m_apply, &QPushButton::clicked, this, &UserLightPage::applyToKeyboard);
+    auto *glow = new QGraphicsDropShadowEffect(m_apply);
+    glow->setBlurRadius(28);
+    glow->setOffset(0, 0);
+    glow->setColor(QColor(0x6E, 0x8B, 0xFF, 110));
+    m_apply->setGraphicsEffect(glow);
+    footerRow->addWidget(m_apply, 0, Qt::AlignRight);
+    contentLayout()->addWidget(footer);
+    contentLayout()->addStretch();
+
+    connect(m_wheel, &ColorWheel::hsvChanged, this, [this](qreal hue, qreal saturation) {
+        m_color = QColor::fromHsvF(hue, saturation, 1.0);
+        if (m_board->hasSelection())
+            m_board->paintSelected(m_color);
+        updateColorUi();
+    });
+
+    connect(m_controller, &KeyboardController::perKeyApplied, this,
+            [this](bool ok, const QString &message) {
+                m_status->setText(message);
+                m_status->setStyleSheet(
+                    QStringLiteral("color: %1;")
+                        .arg(ok ? Theme::Success.name() : Theme::Warning.name()));
+            });
+
+    auto updateEnabled = [this]() {
+        const bool enabled = m_controller->connected() && !m_controller->busy();
+        m_apply->setEnabled(enabled);
+        m_apply->setText(m_controller->busy() ? QStringLiteral("正在写入...")
+                                             : QStringLiteral("写入键盘"));
+    };
+    connect(m_controller, &KeyboardController::stateChanged, this, updateEnabled);
+    updateEnabled();
+
+    m_wheel->setHsv(m_color.hsvHueF() < 0.0 ? 0.0 : m_color.hsvHueF(),
+                    m_color.hsvSaturationF(), 1.0);
+    updateColorUi();
+}
+
+void UserLightPage::loadSlots()
+{
+    QSettings settings;
+    const int count = qBound(1, settings.value(QStringLiteral("perkey/count"), 2).toInt(), 32);
+    m_slots.clear();
+    m_slotNames.clear();
+
+    for (int slot = 0; slot < count; ++slot) {
+        QString name = settings.value(QStringLiteral("perkey/name%1").arg(slot)).toString();
+        if (name.isEmpty())
+            name = QStringLiteral("方案 %1").arg(slot + 1);
+
+        QVector<QColor> colors(KeyLayout::kRecordCount);
+        const QString text = settings
+            .value(QStringLiteral("perkey/slot%1").arg(slot))
+            .toString();
+        for (const QString &item : text.split(QLatin1Char(','), Qt::SkipEmptyParts)) {
+            const QStringList parts = item.split(QLatin1Char(':'));
+            if (parts.size() != 2)
+                continue;
+            bool ok = false;
+            const int index = parts[0].toInt(&ok);
+            if (!ok || index < 0 || index >= KeyLayout::kRecordCount)
+                continue;
+            const QColor color(QStringLiteral("#") + parts[1]);
+            if (color.isValid())
+                colors[index] = color;
+        }
+        m_slots.append(colors);
+        m_slotNames.append(name);
+    }
+
+    m_slot = 0;
+    rebuildSlotTabs();
+}
+
+void UserLightPage::saveSlots()
+{
+    QSettings settings;
+    settings.setValue(QStringLiteral("perkey/count"), m_slots.size());
+    for (int slot = 0; slot < m_slots.size(); ++slot) {
+        QStringList items;
+        const QVector<QColor> &colors = m_slots[slot];
+        for (int index = 0; index < colors.size(); ++index) {
+            if (colors[index].isValid())
+                items << QStringLiteral("%1:%2")
+                             .arg(index)
+                             .arg(colors[index].name().mid(1));
+        }
+        settings.setValue(QStringLiteral("perkey/name%1").arg(slot),
+                          m_slotNames.value(slot));
+        settings.setValue(QStringLiteral("perkey/slot%1").arg(slot),
+                          items.join(QLatin1Char(',')));
+    }
+}
+
+void UserLightPage::updateColorUi()
+{
+    m_swatch->setStyleSheet(
+        QStringLiteral("background-color: %1; border: 1px solid rgba(255, 255, 255, 45); "
+                       "border-radius: 10px;")
+            .arg(Theme::hex(m_color)));
+    if (!m_hex->hasFocus()) {
+        const QSignalBlocker blocker(m_hex);
+        m_hex->setText(Theme::hex(m_color));
+    }
+}
+
+void UserLightPage::applyHex()
+{
+    QString text = m_hex->text().trimmed();
+    if (!text.startsWith(QLatin1Char('#')) && text.size() == 6)
+        text.prepend(QLatin1Char('#'));
+
+    const QColor color(text);
+    if (color.isValid()) {
+        m_color = color;
+        qreal hue = color.hsvHueF();
+        if (hue < 0.0)
+            hue = 0.0;
+        m_wheel->setHsv(hue, color.hsvSaturationF(), 1.0);
+        if (m_board->hasSelection())
+            m_board->paintSelected(m_color);
+    }
+    m_hex->clearFocus();
+    updateColorUi();
+}
+
+void UserLightPage::switchSlot(int slot)
+{
+    if (slot < 0 || slot >= m_slots.size() || slot == m_slot)
+        return;
+
+    m_slots[m_slot] = m_board->colors();
+    saveSlots();
+    m_slot = slot;
+    m_board->setColors(m_slots[m_slot]);
+    m_board->clearSelection();
+    rebuildSlotTabs();
+    m_status->setText(QStringLiteral("已切换到方案「%1」").arg(m_slotNames.value(m_slot)));
+    updateColorUi();
+
+    // 切组即写回键盘，否则另一组的颜色会被上一次的整块写入覆盖。
+    if (m_controller->connected() && !m_controller->busy())
+        m_controller->applyPerKey(m_board->colors(), m_slot);
+}
+
+void UserLightPage::rebuildSlotTabs()
+{
+    while (QLayoutItem *item = m_slotTabs->takeAt(0)) {
+        if (QWidget *widget = item->widget()) {
+            widget->hide();
+            widget->deleteLater();
+        }
+        delete item;
+    }
+
+    for (int i = 0; i < m_slots.size(); ++i) {
+        auto *button = new QPushButton(m_slotNames.value(i), this);
+        button->setObjectName(QStringLiteral("segment"));
+        button->setCheckable(true);
+        button->setChecked(i == m_slot);
+        button->setCursor(Qt::PointingHandCursor);
+        connect(button, &QPushButton::clicked, this, [this, i]() { switchSlot(i); });
+        m_slotTabs->addWidget(button);
+    }
+}
+
+void UserLightPage::addSlot()
+{
+    m_slots[m_slot] = m_board->colors();
+    m_slots.append(QVector<QColor>(KeyLayout::kRecordCount));
+    m_slotNames.append(QStringLiteral("方案 %1").arg(m_slots.size()));
+    m_slot = m_slots.size() - 1;
+    m_board->setColors(m_slots[m_slot]);
+    m_board->clearSelection();
+    rebuildSlotTabs();
+    saveSlots();
+    m_status->setText(QStringLiteral("已新建方案「%1」").arg(m_slotNames.value(m_slot)));
+}
+
+void UserLightPage::removeSlot()
+{
+    if (m_slots.size() <= 1) {
+        m_status->setText(QStringLiteral("至少保留一个方案"));
+        return;
+    }
+
+    m_slots.removeAt(m_slot);
+    m_slotNames.removeAt(m_slot);
+    m_slot = qBound(0, m_slot, m_slots.size() - 1);
+    m_board->setColors(m_slots[m_slot]);
+    m_board->clearSelection();
+    rebuildSlotTabs();
+    saveSlots();
+    m_status->setText(QStringLiteral("已删除，当前方案「%1」")
+                           .arg(m_slotNames.value(m_slot)));
+
+    if (m_controller->connected() && !m_controller->busy())
+        m_controller->applyPerKey(m_board->colors(), m_slot);
+}
+
+void UserLightPage::refreshSelection()
+{
+    const QVector<int> keys = m_board->selectedKeys();
+    if (keys.isEmpty()) {
+        m_selection->setText(QStringLiteral("未选择按键"));
+        return;
+    }
+    m_selection->setText(QStringLiteral("已选 %1 个按键").arg(keys.size()));
+    if (keys.size() == 1) {
+        const QColor color = m_board->colors().value(keys.first());
+        if (color.isValid()) {
+            m_color = color;
+            updateColorUi();
+        }
+    }
+}
+
+void UserLightPage::applyToKeyboard()
+{
+    m_slots[m_slot] = m_board->colors();
+    saveSlots();
+    m_controller->applyPerKey(m_board->colors(), m_slot);
+}
+
+void UserLightPage::clearBoard()
+{
+    m_board->setColors(QVector<QColor>(KeyLayout::kRecordCount));
+    m_slots[m_slot] = m_board->colors();
+    saveSlots();
+    m_status->setText(QStringLiteral("已将编辑区所有键设为不亮，点「写入键盘」生效"));
+}
+
 ClockPage::ClockPage(KeyboardController *controller, QWidget *parent)
     : PageScroll(parent)
     , m_controller(controller)
@@ -1390,8 +1826,7 @@ void AboutPage::buildUi()
         {QStringLiteral("重置键盘 / 恢复出厂"), QStringLiteral("USB 已验证"), true},
         {QStringLiteral("USB 有线 / 2.4G 无线自动识别"), QStringLiteral("已支持"), true},
         {QStringLiteral("2.4G 灯效写入"), QStringLiteral("实测通过"), true},
-        {QStringLiteral("用户灯光 / 自定义灯光（逐键 RGB）"), QStringLiteral("逆向中"), false},
-        {QStringLiteral("TFT GIF"), QStringLiteral("待开始"), false}
+        {QStringLiteral("用户灯光（逐键 RGB）"), QStringLiteral("USB 已验证"), true}
     };
 
     for (const Feature &feature : items) {

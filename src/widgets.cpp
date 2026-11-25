@@ -21,6 +21,7 @@
 #include <QVBoxLayout>
 #include <QWindow>
 
+#include <algorithm>
 #include <cmath>
 
 namespace {
@@ -925,6 +926,208 @@ void KeyboardPreview::paintEvent(QPaintEvent *event)
     painter.setPen(Qt::NoPen);
     painter.setBrush(reflection);
     painter.drawRoundedRect(QRectF(x0, spaceY + keyHeight + 6, totalWidth, 24), 10, 10);
+}
+
+PerKeyBoard::PerKeyBoard(QWidget *parent)
+    : QWidget(parent)
+    , m_colors(KeyLayout::kRecordCount)
+{
+    setMinimumSize(520, 220);
+    setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    setMouseTracking(true);
+    setCursor(Qt::PointingHandCursor);
+}
+
+void PerKeyBoard::setColors(const QVector<QColor> &colors)
+{
+    m_colors = colors;
+    if (m_colors.size() < KeyLayout::kRecordCount)
+        m_colors.resize(KeyLayout::kRecordCount);
+    update();
+}
+
+QVector<int> PerKeyBoard::selectedKeys() const
+{
+    QVector<int> keys = m_selected.values().toVector();
+    std::sort(keys.begin(), keys.end());
+    return keys;
+}
+
+void PerKeyBoard::clearSelection()
+{
+    if (m_selected.isEmpty())
+        return;
+    m_selected.clear();
+    emit selectionChanged();
+    update();
+}
+
+void PerKeyBoard::selectAll()
+{
+    for (int i = 0; i < KeyLayout::kKeyCount; ++i)
+        m_selected.insert(KeyLayout::kKeys[i].index);
+    emit selectionChanged();
+    update();
+}
+
+void PerKeyBoard::paintSelected(const QColor &color)
+{
+    if (!color.isValid())
+        return;
+    for (int index : m_selected) {
+        if (index >= 0 && index < m_colors.size())
+            m_colors[index] = color;
+    }
+    update();
+}
+
+QSize PerKeyBoard::sizeHint() const
+{
+    return QSize(860, 340);
+}
+
+QRectF PerKeyBoard::boardRect() const
+{
+    const qreal padding = 18.0;
+    const QRectF available = rect().adjusted(padding, padding, -padding, -padding);
+    const qreal scale = qMin(available.width() / KeyLayout::kBoardWidth,
+                             available.height() / KeyLayout::kBoardHeight);
+    const qreal width = KeyLayout::kBoardWidth * scale;
+    const qreal height = KeyLayout::kBoardHeight * scale;
+    return QRectF(available.center().x() - width / 2.0,
+                  available.center().y() - height / 2.0, width, height);
+}
+
+QRectF PerKeyBoard::keyRect(const KeyLayout::Key &key) const
+{
+    const QRectF board = boardRect();
+    const qreal scale = board.width() / KeyLayout::kBoardWidth;
+    const qreal x = board.left() + (key.x - 12.0) * scale;
+    const qreal y = board.top() + (key.y - 17.0) * scale;
+    return QRectF(x, y, key.w * scale, key.h * scale);
+}
+
+int PerKeyBoard::keyAt(const QPointF &pos) const
+{
+    for (int i = 0; i < KeyLayout::kKeyCount; ++i) {
+        if (keyRect(KeyLayout::kKeys[i]).contains(pos))
+            return KeyLayout::kKeys[i].index;
+    }
+    return -1;
+}
+
+void PerKeyBoard::paintEvent(QPaintEvent *event)
+{
+    Q_UNUSED(event)
+    QPainter painter(this);
+    painter.setRenderHint(QPainter::Antialiasing);
+
+    const QRectF board = boardRect();
+    painter.setPen(QPen(QColor(255, 255, 255, 18), 1));
+    painter.setBrush(QColor(0x0B1018));
+    painter.drawRoundedRect(board.adjusted(-10, -10, 10, 10), 14, 14);
+
+    const QRectF dragRect = QRectF(m_dragStart, m_dragCurrent).normalized();
+
+    for (int i = 0; i < KeyLayout::kKeyCount; ++i) {
+        const KeyLayout::Key &key = KeyLayout::kKeys[i];
+        const QRectF r = keyRect(key);
+        const QColor color = m_colors.value(key.index);
+        const bool selected = m_selected.contains(key.index);
+        const bool hovered = m_hover == key.index;
+
+        painter.setBrush(color.isValid() ? color : QColor(0x1A2230));
+        painter.setPen(QPen(selected ? Theme::Accent
+                                     : (hovered ? QColor(255, 255, 255, 90)
+                                                : QColor(255, 255, 255, 22)),
+                            selected ? 1.8 : 1.0));
+        painter.drawRoundedRect(r, 4, 4);
+
+        if (selected) {
+            painter.setBrush(Qt::NoBrush);
+            painter.setPen(QPen(withAlpha(Theme::Accent, 70), 3.0));
+            painter.drawRoundedRect(r.adjusted(-1.5, -1.5, 1.5, 1.5), 5, 5);
+        }
+
+        const bool bright = color.isValid() && color.lightnessF() > 0.6;
+        painter.setPen(bright ? QColor(0x0A0E15) : QColor(0xC9D2E0));
+        QFont font = Theme::uiFont(7);
+        painter.setFont(font);
+        painter.drawText(r, Qt::AlignCenter, KeyLayout::displayName(key));
+    }
+
+    if (m_dragging) {
+        painter.setBrush(withAlpha(Theme::Accent, 26));
+        painter.setPen(QPen(withAlpha(Theme::Accent, 160), 1.0, Qt::DashLine));
+        painter.drawRect(dragRect);
+    }
+}
+
+void PerKeyBoard::mousePressEvent(QMouseEvent *event)
+{
+    if (event->button() != Qt::LeftButton)
+        return;
+    m_dragStart = event->position();
+    m_dragCurrent = m_dragStart;
+    m_dragging = false;
+    const int index = keyAt(m_dragStart);
+    if (index < 0)
+        return;
+
+    if (!(event->modifiers() & Qt::ControlModifier))
+        m_selected.clear();
+    if (m_selected.contains(index))
+        m_selected.remove(index);
+    else
+        m_selected.insert(index);
+    emit selectionChanged();
+    update();
+}
+
+void PerKeyBoard::mouseMoveEvent(QMouseEvent *event)
+{
+    const int hover = keyAt(event->position());
+    if (hover != m_hover) {
+        m_hover = hover;
+        update();
+    }
+    if (event->buttons() & Qt::LeftButton) {
+        m_dragCurrent = event->position();
+        if (!m_dragging
+            && (m_dragCurrent - m_dragStart).manhattanLength() > 6.0) {
+            m_dragging = true;
+        }
+        if (m_dragging)
+            update();
+    }
+}
+
+void PerKeyBoard::mouseReleaseEvent(QMouseEvent *event)
+{
+    if (event->button() != Qt::LeftButton)
+        return;
+
+    if (m_dragging) {
+        const QRectF dragRect = QRectF(m_dragStart, event->position()).normalized();
+        if (!(event->modifiers() & Qt::ControlModifier))
+            m_selected.clear();
+        for (int i = 0; i < KeyLayout::kKeyCount; ++i) {
+            if (keyRect(KeyLayout::kKeys[i]).intersects(dragRect))
+                m_selected.insert(KeyLayout::kKeys[i].index);
+        }
+        emit selectionChanged();
+    }
+    m_dragging = false;
+    update();
+}
+
+void PerKeyBoard::leaveEvent(QEvent *event)
+{
+    Q_UNUSED(event)
+    if (m_hover >= 0) {
+        m_hover = -1;
+        update();
+    }
 }
 
 Toast::Toast(QWidget *parent)

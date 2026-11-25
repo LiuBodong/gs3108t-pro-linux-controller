@@ -5,10 +5,13 @@
 #include <QFrame>
 #include <QImage>
 #include <QPixmap>
+#include <QSet>
 #include <QString>
 #include <QStringList>
 #include <QVector>
 #include <QWidget>
+
+#include "keylayout.h"
 
 class QButtonGroup;
 class QGraphicsOpacityEffect;
@@ -264,6 +267,44 @@ private:
     int m_speed = 3;
     qreal m_phase = 0.0;
     QTimer *m_timer = nullptr;
+};
+
+class PerKeyBoard : public QWidget {
+    Q_OBJECT
+
+public:
+    explicit PerKeyBoard(QWidget *parent = nullptr);
+
+    void setColors(const QVector<QColor> &colors);
+    QVector<QColor> colors() const { return m_colors; }
+    QVector<int> selectedKeys() const;
+    bool hasSelection() const { return !m_selected.isEmpty(); }
+    void clearSelection();
+    void selectAll();
+    void paintSelected(const QColor &color);
+    QSize sizeHint() const override;
+
+signals:
+    void selectionChanged();
+
+protected:
+    void paintEvent(QPaintEvent *event) override;
+    void mousePressEvent(QMouseEvent *event) override;
+    void mouseMoveEvent(QMouseEvent *event) override;
+    void mouseReleaseEvent(QMouseEvent *event) override;
+    void leaveEvent(QEvent *event) override;
+
+private:
+    QRectF boardRect() const;
+    QRectF keyRect(const KeyLayout::Key &key) const;
+    int keyAt(const QPointF &pos) const;
+
+    QVector<QColor> m_colors;
+    QSet<int> m_selected;
+    int m_hover = -1;
+    bool m_dragging = false;
+    QPointF m_dragStart;
+    QPointF m_dragCurrent;
 };
 
 class Toast : public QWidget {

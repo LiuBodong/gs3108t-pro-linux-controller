@@ -1,7 +1,9 @@
 #pragma once
 
+#include <QColor>
 #include <QObject>
 #include <QVariantList>
+#include <QVector>
 
 #include "hidmanager.h"
 
@@ -44,6 +46,7 @@ public:
     Q_INVOKABLE bool uploadGif(const QString &path);
     Q_INVOKABLE bool syncClock();
     Q_INVOKABLE bool applyTestLight();
+    bool applyPerKey(const QVector<QColor> &colors, int slot);
 
 signals:
     void stateChanged();
@@ -54,6 +57,7 @@ signals:
     void gifUploadProgress(int percent);
     void gifUploaded(bool ok, const QString &message);
     void clockSynced(bool ok, const QString &message);
+    void perKeyApplied(bool ok, const QString &message);
 
 private:
     bool ensureActive();
@@ -66,6 +70,7 @@ private:
                              bool disableAltTab);
     bool clearLightStoreUsb(int command);
     bool clearPerKeyUsb();
+    bool applyPerKeyUsb(const QVector<QColor> &colors, int slot);
     bool applyDefaultLightUsb();
     bool sendClockUsb();
     bool sendClockWireless();

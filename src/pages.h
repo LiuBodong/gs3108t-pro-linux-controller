@@ -77,6 +77,39 @@ private:
     QVBoxLayout *m_presetList = nullptr;
 };
 
+class UserLightPage : public PageScroll {
+public:
+    explicit UserLightPage(KeyboardController *controller, QWidget *parent = nullptr);
+
+private:
+    void buildUi();
+    void updateColorUi();
+    void applyHex();
+    void switchSlot(int slot);
+    void refreshSelection();
+    void applyToKeyboard();
+    void clearBoard();
+    void loadSlots();
+    void saveSlots();
+    void rebuildSlotTabs();
+    void addSlot();
+    void removeSlot();
+
+    KeyboardController *m_controller = nullptr;
+    int m_slot = 0;
+    QColor m_color{0xFF, 0x3B, 0x30};
+    QVector<QVector<QColor>> m_slots;
+    QStringList m_slotNames;
+    PerKeyBoard *m_board = nullptr;
+    QHBoxLayout *m_slotTabs = nullptr;
+    ColorWheel *m_wheel = nullptr;
+    QLabel *m_swatch = nullptr;
+    QLineEdit *m_hex = nullptr;
+    QLabel *m_selection = nullptr;
+    QLabel *m_status = nullptr;
+    QPushButton *m_apply = nullptr;
+};
+
 class ClockPage : public PageScroll {
 public:
     explicit ClockPage(KeyboardController *controller, QWidget *parent = nullptr);
