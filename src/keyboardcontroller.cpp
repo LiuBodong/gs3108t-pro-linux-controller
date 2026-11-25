@@ -7,10 +7,10 @@
 #include <QImage>
 #include <QImageReader>
 #include <QPainter>
-#include <QSettings>
 
 #include <cstring>
 
+#include "configstore.h"
 #include "keylayout.h"
 
 static QString joinSizes(const QList<int> &sizes)
@@ -24,9 +24,8 @@ static QString joinSizes(const QList<int> &sizes)
 KeyboardController::KeyboardController(QObject *parent)
     : QObject(parent)
 {
-    QSettings settings;
-    m_preferredMode = settings.value(QStringLiteral("connection/mode"),
-                                     QStringLiteral("auto"))
+    m_preferredMode = ConfigStore::value(QStringLiteral("connection/mode"),
+                                         QStringLiteral("auto"))
                           .toString();
     if (m_preferredMode != QStringLiteral("auto")
         && m_preferredMode != QStringLiteral("usb")
@@ -85,8 +84,8 @@ void KeyboardController::setPreferredMode(const QString &mode)
         return;
     }
     setPreferredModeTransient(mode);
-    QSettings settings;
-    settings.setValue(QStringLiteral("connection/mode"), mode);
+    ConfigStore::setValue(QStringLiteral("connection/mode"), mode);
+    ConfigStore::sync();
 }
 
 void KeyboardController::setPreferredModeTransient(const QString &mode)

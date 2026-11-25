@@ -1,35 +1,22 @@
 #include "presetstore.h"
 
-#include <QDir>
-#include <QFile>
-#include <QFileInfo>
+#include "configstore.h"
+
 #include <QJsonArray>
-#include <QJsonDocument>
 #include <QJsonObject>
-#include <QStandardPaths>
 
 namespace PresetStore {
 
 QString filePath()
 {
-    const QString base =
-        QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation);
-    return base + QStringLiteral("/gs3108t-pro/presets.json");
+    return ConfigStore::filePath();
 }
 
 QVector<LightPreset> load()
 {
     QVector<LightPreset> presets;
 
-    QFile file(filePath());
-    if (!file.open(QIODevice::ReadOnly))
-        return presets;
-
-    const QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
-    if (!doc.isObject())
-        return presets;
-
-    const QJsonArray items = doc.object().value(QStringLiteral("presets")).toArray();
+    const QJsonArray items = ConfigStore::array(QStringLiteral("presets"));
     presets.reserve(items.size());
     for (const QJsonValue &value : items) {
         const QJsonObject obj = value.toObject();
@@ -67,17 +54,8 @@ bool save(const QVector<LightPreset> &presets)
         items.append(obj);
     }
 
-    QJsonObject root;
-    root.insert(QStringLiteral("version"), 1);
-    root.insert(QStringLiteral("presets"), items);
-
-    const QString path = filePath();
-    QDir().mkpath(QFileInfo(path).absolutePath());
-
-    QFile file(path);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate))
-        return false;
-    return file.write(QJsonDocument(root).toJson(QJsonDocument::Indented)) >= 0;
+    ConfigStore::setArray(QStringLiteral("presets"), items);
+    return ConfigStore::sync();
 }
 
 } // namespace PresetStore

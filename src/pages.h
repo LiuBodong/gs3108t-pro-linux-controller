@@ -12,10 +12,12 @@ class QFrame;
 class QLabel;
 class QLineEdit;
 class QMovie;
-class QPlainTextEdit;
+class QProcess;
 class QProgressBar;
 class QPushButton;
 class QSegmentedControl;
+class QShowEvent;
+class QTemporaryFile;
 class QTimer;
 class QVBoxLayout;
 
@@ -175,10 +177,16 @@ class DevicePage : public PageScroll {
 public:
     explicit DevicePage(KeyboardController *controller, QWidget *parent = nullptr);
 
+protected:
+    void showEvent(QShowEvent *event) override;
+
 private:
     void buildUi();
     void refreshUi();
     void rebuildInterfaceList();
+    void refreshRuleState();
+    void installRule();
+    void finishRuleInstall(bool ok, const QString &error);
 
     KeyboardController *m_controller = nullptr;
     QLabel *m_iconBadge = nullptr;
@@ -187,8 +195,12 @@ private:
     SegmentedControl *m_modeControl = nullptr;
     QWidget *m_listContainer = nullptr;
     QVBoxLayout *m_listLayout = nullptr;
-    QPlainTextEdit *m_code = nullptr;
     QPushButton *m_refreshButton = nullptr;
+    QLabel *m_ruleStatus = nullptr;
+    QLabel *m_ruleHint = nullptr;
+    QPushButton *m_installRule = nullptr;
+    QProcess *m_installProcess = nullptr;
+    QTemporaryFile *m_ruleTemp = nullptr;
 };
 
 class AboutPage : public PageScroll {

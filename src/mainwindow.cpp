@@ -180,7 +180,7 @@ Sidebar::Sidebar(KeyboardController *controller, QWidget *parent)
 
     layout->addWidget(deviceCard);
 
-    auto *version = new QLabel(QStringLiteral("v0.2.0"));
+    auto *version = new QLabel(QStringLiteral("v0.2.1"));
     version->setAlignment(Qt::AlignHCenter);
     version->setFont(Theme::monoFont(11));
     version->setStyleSheet(QStringLiteral("color: #5E697C;"));

@@ -1,6 +1,7 @@
 <RCC>
     <qresource prefix="/">
         <file>assets/style.qss</file>
+        <file>assets/70-gs3108t-pro.rules</file>
         <file>assets/icons/about.svg</file>
         <file>assets/icons/brightness.svg</file>
         <file>assets/icons/check.svg</file>

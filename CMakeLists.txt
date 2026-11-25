@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.30)
 
-project(GS3108TPro VERSION 0.2.0 LANGUAGES CXX)
+project(GS3108TPro VERSION 0.2.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 26)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -19,6 +19,8 @@ qt_add_executable(gs3108t-pro
     src/hidmanager.cpp
     src/keyboardcontroller.h
     src/keyboardcontroller.cpp
+    src/configstore.h
+    src/configstore.cpp
     src/lightmodes.h
     src/presetstore.h
     src/presetstore.cpp

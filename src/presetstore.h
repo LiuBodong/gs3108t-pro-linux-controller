@@ -17,7 +17,7 @@ struct LightPreset {
 
 namespace PresetStore {
 
-// ~/.config/gs3108t-pro/presets.json
+// 预设保存在统一配置 ~/.config/gs3108t-pro/config.json 的 presets 下。
 QString filePath();
 QVector<LightPreset> load();
 bool save(const QVector<LightPreset> &presets);

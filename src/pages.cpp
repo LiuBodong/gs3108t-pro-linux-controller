@@ -1,31 +1,37 @@
 #include "pages.h"
 
+#include "configstore.h"
 #include "keyboardcontroller.h"
 #include "lightmodes.h"
 #include "theme.h"
 
-#include <QClipboard>
 #include <QDate>
+#include <QDir>
+#include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFrame>
 #include <QGraphicsDropShadowEffect>
 #include <QGridLayout>
-#include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QImageReader>
+#include <QJsonArray>
+#include <QJsonObject>
 #include <QLabel>
 #include <QMovie>
 #include <QProgressBar>
 #include <QLineEdit>
 #include <QLinearGradient>
 #include <QPainter>
-#include <QPlainTextEdit>
+#include <QProcess>
+#include <QProcessEnvironment>
 #include <QPushButton>
 #include <QResizeEvent>
 #include <QScrollBar>
-#include <QSettings>
+#include <QShowEvent>
 #include <QSignalBlocker>
+#include <QStandardPaths>
+#include <QTemporaryFile>
 #include <QTime>
 #include <QTimer>
 #include <QVBoxLayout>
@@ -63,6 +69,100 @@ QFrame *makeDivider()
     line->setFixedHeight(1);
     line->setStyleSheet(QStringLiteral("background-color: #1C2331;"));
     return line;
+}
+
+constexpr auto kUdevRuleName = "70-gs3108t-pro.rules";
+
+QStringList udevRulePaths()
+{
+    return {
+        QStringLiteral("/etc/udev/rules.d/") + QLatin1String(kUdevRuleName),
+        QStringLiteral("/usr/lib/udev/rules.d/") + QLatin1String(kUdevRuleName),
+        QStringLiteral("/lib/udev/rules.d/") + QLatin1String(kUdevRuleName),
+    };
+}
+
+bool udevRuleInstalled()
+{
+    for (const QString &path : udevRulePaths()) {
+        QFile file(path);
+        if (!file.exists())
+            continue;
+        if (!file.open(QIODevice::ReadOnly))
+            return true;
+        const QString text = QString::fromUtf8(file.readAll());
+        return text.contains(QLatin1String("05ac")) && text.contains(QLatin1String("024f"));
+    }
+    return false;
+}
+
+struct ElevationTool {
+    QString program;
+    QStringList arguments;
+    QString name;
+    QString askpass;
+};
+
+QString findAskpassProgram()
+{
+    const QString fromEnv = qEnvironmentVariable("SUDO_ASKPASS");
+    if (!fromEnv.isEmpty())
+        return fromEnv;
+
+    const QStringList candidates = {
+        QStringLiteral("ssh-askpass"),
+        QStringLiteral("ksshaskpass"),
+        QStringLiteral("lxqt-openssh-askpass"),
+        QStringLiteral("x11-ssh-askpass"),
+    };
+    for (const QString &candidate : candidates) {
+        const QString path = QStandardPaths::findExecutable(candidate);
+        if (!path.isEmpty())
+            return path;
+    }
+    return {};
+}
+
+// 按可用性和可靠性排序：pkexec / run0 有图形授权，其次是 sudo + askpass、
+// kdesu，最后是免密码的 sudo -n / doas -n。
+QVector<ElevationTool> elevationTools(const QString &script)
+{
+    QVector<ElevationTool> tools;
+
+    const auto add = [&tools, &script](const QString &program, const QString &name,
+                                       const QStringList &prefix = {},
+                                       const QString &askpass = {}) {
+        if (QStandardPaths::findExecutable(program).isEmpty())
+            return;
+        ElevationTool tool;
+        tool.program = program;
+        tool.name = name;
+        tool.askpass = askpass;
+        tool.arguments = prefix;
+        tool.arguments << QStringLiteral("sh") << QStringLiteral("-c") << script;
+        tools.append(tool);
+    };
+
+    add(QStringLiteral("pkexec"), QStringLiteral("pkexec"));
+    add(QStringLiteral("run0"), QStringLiteral("run0"));
+
+    const QString askpass = findAskpassProgram();
+    if (!askpass.isEmpty())
+        add(QStringLiteral("sudo"), QStringLiteral("sudo"), {QStringLiteral("-A")}, askpass);
+
+    if (!QStandardPaths::findExecutable(QStringLiteral("kdesu")).isEmpty()) {
+        ElevationTool tool;
+        tool.program = QStringLiteral("kdesu");
+        tool.name = QStringLiteral("kdesu");
+        tool.arguments = {QStringLiteral("-c"), script};
+        tools.append(tool);
+    }
+
+    if (askpass.isEmpty())
+        add(QStringLiteral("sudo"), QStringLiteral("sudo -n"), {QStringLiteral("-n")});
+    add(QStringLiteral("doas"), QStringLiteral("doas -n"), {QStringLiteral("-n")});
+
+    return tools;
 }
 
 } // namespace
@@ -757,29 +857,26 @@ void UserLightPage::buildUi()
 
 void UserLightPage::loadSlots()
 {
-    QSettings settings;
-    const int count = qBound(1, settings.value(QStringLiteral("perkey/count"), 2).toInt(), 32);
+    const int count = qBound(1, ConfigStore::value(QStringLiteral("perKey/count"), 2).toInt(), 32);
+    const QJsonArray slotList = ConfigStore::array(QStringLiteral("perKey/slots"));
     m_slots.clear();
     m_slotNames.clear();
 
     for (int slot = 0; slot < count; ++slot) {
-        QString name = settings.value(QStringLiteral("perkey/name%1").arg(slot)).toString();
+        const QJsonObject entry = slot < slotList.size() ? slotList.at(slot).toObject()
+                                                         : QJsonObject();
+        QString name = entry.value(QStringLiteral("name")).toString();
         if (name.isEmpty())
             name = QStringLiteral("方案 %1").arg(slot + 1);
 
         QVector<QColor> colors(KeyLayout::kRecordCount);
-        const QString text = settings
-            .value(QStringLiteral("perkey/slot%1").arg(slot))
-            .toString();
-        for (const QString &item : text.split(QLatin1Char(','), Qt::SkipEmptyParts)) {
-            const QStringList parts = item.split(QLatin1Char(':'));
-            if (parts.size() != 2)
-                continue;
+        const QJsonObject stored = entry.value(QStringLiteral("colors")).toObject();
+        for (auto it = stored.begin(); it != stored.end(); ++it) {
             bool ok = false;
-            const int index = parts[0].toInt(&ok);
+            const int index = it.key().toInt(&ok);
             if (!ok || index < 0 || index >= KeyLayout::kRecordCount)
                 continue;
-            const QColor color(QStringLiteral("#") + parts[1]);
+            const QColor color(QStringLiteral("#") + it.value().toString());
             if (color.isValid())
                 colors[index] = color;
         }
@@ -793,22 +890,26 @@ void UserLightPage::loadSlots()
 
 void UserLightPage::saveSlots()
 {
-    QSettings settings;
-    settings.setValue(QStringLiteral("perkey/count"), m_slots.size());
+    QJsonArray slotList;
     for (int slot = 0; slot < m_slots.size(); ++slot) {
-        QStringList items;
-        const QVector<QColor> &colors = m_slots[slot];
-        for (int index = 0; index < colors.size(); ++index) {
-            if (colors[index].isValid())
-                items << QStringLiteral("%1:%2")
-                             .arg(index)
-                             .arg(colors[index].name().mid(1));
+        QJsonObject entry;
+        entry.insert(QStringLiteral("name"), m_slotNames.value(slot));
+
+        QJsonObject colors;
+        const QVector<QColor> &slotColors = m_slots[slot];
+        for (int index = 0; index < slotColors.size(); ++index) {
+            if (slotColors[index].isValid()) {
+                colors.insert(QString::number(index),
+                              slotColors[index].name(QColor::HexRgb).mid(1).toUpper());
+            }
         }
-        settings.setValue(QStringLiteral("perkey/name%1").arg(slot),
-                          m_slotNames.value(slot));
-        settings.setValue(QStringLiteral("perkey/slot%1").arg(slot),
-                          items.join(QLatin1Char(',')));
+        entry.insert(QStringLiteral("colors"), colors);
+        slotList.append(entry);
     }
+
+    ConfigStore::setValue(QStringLiteral("perKey/count"), m_slots.size());
+    ConfigStore::setArray(QStringLiteral("perKey/slots"), slotList);
+    ConfigStore::sync();
 }
 
 void UserLightPage::updateColorUi()
@@ -1345,24 +1446,23 @@ void SystemPage::buildUi()
 
 void SystemPage::loadSettings()
 {
-    QSettings settings;
-    const int response = qBound(1, settings.value(QStringLiteral("system/response"), 2).toInt(), 5);
-    const int sleep = qBound(0, settings.value(QStringLiteral("system/sleep"), 2).toInt(), 3);
+    const int response = qBound(1, ConfigStore::value(QStringLiteral("system/response"), 2).toInt(), 5);
+    const int sleep = qBound(0, ConfigStore::value(QStringLiteral("system/sleep"), 2).toInt(), 3);
     m_response->setCurrentIndex(response - 1);
     m_sleep->setCurrentIndex(sleep);
-    m_win->setChecked(settings.value(QStringLiteral("system/disableWin"), false).toBool(), false);
-    m_altf4->setChecked(settings.value(QStringLiteral("system/disableAltF4"), false).toBool(), false);
-    m_alttab->setChecked(settings.value(QStringLiteral("system/disableAltTab"), false).toBool(), false);
+    m_win->setChecked(ConfigStore::value(QStringLiteral("system/disableWin"), false).toBool(), false);
+    m_altf4->setChecked(ConfigStore::value(QStringLiteral("system/disableAltF4"), false).toBool(), false);
+    m_alttab->setChecked(ConfigStore::value(QStringLiteral("system/disableAltTab"), false).toBool(), false);
 }
 
 void SystemPage::saveSettings()
 {
-    QSettings settings;
-    settings.setValue(QStringLiteral("system/response"), m_response->currentIndex() + 1);
-    settings.setValue(QStringLiteral("system/sleep"), m_sleep->currentIndex());
-    settings.setValue(QStringLiteral("system/disableWin"), m_win->isChecked());
-    settings.setValue(QStringLiteral("system/disableAltF4"), m_altf4->isChecked());
-    settings.setValue(QStringLiteral("system/disableAltTab"), m_alttab->isChecked());
+    ConfigStore::setValue(QStringLiteral("system/response"), m_response->currentIndex() + 1);
+    ConfigStore::setValue(QStringLiteral("system/sleep"), m_sleep->currentIndex());
+    ConfigStore::setValue(QStringLiteral("system/disableWin"), m_win->isChecked());
+    ConfigStore::setValue(QStringLiteral("system/disableAltF4"), m_altf4->isChecked());
+    ConfigStore::setValue(QStringLiteral("system/disableAltTab"), m_alttab->isChecked());
+    ConfigStore::sync();
 }
 
 void SystemPage::refreshAvailability()
@@ -1500,39 +1600,170 @@ void DevicePage::buildUi()
     contentLayout()->addWidget(listCard);
 
     auto *permissionCard = new CardFrame;
-    permissionCard->body()->addWidget(makeLabel(QStringLiteral("权限"),
+    permissionCard->body()->addWidget(makeLabel(QStringLiteral("系统权限"),
                                                 QStringLiteral("cardTitle")));
-    auto *permissionText = makeLabel(
-        QStringLiteral("需要读写 /dev/hidraw*。安装下面的 udev 规则后重新插拔键盘。"),
-        QStringLiteral("muted"));
-    permissionText->setWordWrap(true);
-    permissionCard->body()->addWidget(permissionText);
 
-    m_code = new QPlainTextEdit;
-    m_code->setObjectName(QStringLiteral("code"));
-    m_code->setReadOnly(true);
-    m_code->setFixedHeight(100);
-    m_code->setLineWrapMode(QPlainTextEdit::WidgetWidth);
-    m_code->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    m_code->setPlainText(
-        QStringLiteral("pkexec install -m 644 gs3108_analysis/70-gs3108t-pro.rules /etc/udev/rules.d/70-gs3108t-pro.rules\n"
-                       "pkexec udevadm control --reload-rules\n"
-                       "pkexec udevadm trigger --subsystem-match=hidraw --action=change"));
-    permissionCard->body()->addWidget(m_code);
+    auto *ruleRow = new QHBoxLayout;
+    ruleRow->setSpacing(18);
+    auto *ruleTexts = new QVBoxLayout;
+    ruleTexts->setSpacing(4);
+    m_ruleStatus = makeLabel(QString(), {}, 14, Theme::Text);
+    m_ruleHint = makeLabel(QString(), QStringLiteral("muted"));
+    m_ruleHint->setWordWrap(true);
+    ruleTexts->addWidget(m_ruleStatus);
+    ruleTexts->addWidget(m_ruleHint);
+    ruleTexts->addStretch();
+    ruleRow->addLayout(ruleTexts, 1);
 
-    auto *copyButton = new QPushButton(QStringLiteral("复制命令"));
-    copyButton->setObjectName(QStringLiteral("ghost"));
-    copyButton->setCursor(Qt::PointingHandCursor);
-    connect(copyButton, &QPushButton::clicked, this, [this]() {
-        QGuiApplication::clipboard()->setText(m_code->toPlainText());
-    });
-    auto *copyRow = new QHBoxLayout;
-    copyRow->addWidget(copyButton, 0, Qt::AlignLeft);
-    copyRow->addStretch();
-    permissionCard->body()->addLayout(copyRow);
+    m_installRule = new QPushButton(QStringLiteral("安装规则"));
+    m_installRule->setObjectName(QStringLiteral("primary"));
+    m_installRule->setFixedSize(150, 44);
+    m_installRule->setCursor(Qt::PointingHandCursor);
+    connect(m_installRule, &QPushButton::clicked, this, &DevicePage::installRule);
+    ruleRow->addWidget(m_installRule, 0, Qt::AlignVCenter);
 
+    permissionCard->body()->addLayout(ruleRow);
     contentLayout()->addWidget(permissionCard);
     contentLayout()->addStretch();
+
+    refreshRuleState();
+}
+
+void DevicePage::showEvent(QShowEvent *event)
+{
+    PageScroll::showEvent(event);
+    if (!m_installProcess)
+        refreshRuleState();
+}
+
+void DevicePage::refreshRuleState()
+{
+    const bool installed = udevRuleInstalled();
+    m_ruleStatus->setText(installed ? QStringLiteral("udev 规则已安装")
+                                    : QStringLiteral("未安装 udev 规则"));
+    m_ruleStatus->setStyleSheet(QStringLiteral("color: %1;")
+                                    .arg((installed ? Theme::Success : Theme::Warning).name()));
+    const QVector<ElevationTool> tools = elevationTools(QString());
+    const bool canElevate = !tools.isEmpty();
+    m_ruleHint->setText(
+        installed ? QStringLiteral("当前用户可以直接读写键盘的 /dev/hidraw* 接口。")
+                  : canElevate
+                        ? QStringLiteral("安装后无需 root 权限即可读写键盘，将使用 %1 执行安装。")
+                              .arg(tools.first().name)
+                        : QStringLiteral("未找到可用的提权工具（pkexec / sudo / doas / kdesu），请按 README 手动安装规则。"));
+    m_ruleHint->setStyleSheet(QStringLiteral("color: #8B95A9;"));
+    m_installRule->setVisible(!installed);
+    m_installRule->setEnabled(canElevate);
+}
+
+void DevicePage::installRule()
+{
+    if (m_installProcess)
+        return;
+
+    QFile rule(QStringLiteral(":/assets/70-gs3108t-pro.rules"));
+    auto *temp = new QTemporaryFile(
+        QDir::tempPath() + QStringLiteral("/gs3108t-rule-XXXXXX.rules"), this);
+    if (!rule.open(QIODevice::ReadOnly) || !temp->open()) {
+        temp->deleteLater();
+        m_ruleHint->setText(QStringLiteral("无法读取内置的 udev 规则文件。"));
+        m_ruleHint->setStyleSheet(QStringLiteral("color: %1;").arg(Theme::Warning.name()));
+        return;
+    }
+    temp->write(rule.readAll());
+    temp->close();
+    m_ruleTemp = temp;
+
+    m_installRule->setEnabled(false);
+    m_installRule->setText(QStringLiteral("正在安装…"));
+    m_ruleHint->setText(QStringLiteral("请在弹出的系统授权窗口中输入密码。"));
+    m_ruleHint->setStyleSheet(QStringLiteral("color: #8B95A9;"));
+
+    const QString script =
+        QStringLiteral("install -m 644 \"%1\" \"/etc/udev/rules.d/%2\" && "
+                       "udevadm control --reload-rules && "
+                       "udevadm trigger --subsystem-match=hidraw --action=change")
+            .arg(temp->fileName(), QLatin1String(kUdevRuleName));
+
+    const QVector<ElevationTool> tools = elevationTools(script);
+    if (tools.isEmpty()) {
+        temp->deleteLater();
+        m_ruleTemp = nullptr;
+        m_installRule->setText(QStringLiteral("安装规则"));
+        m_ruleHint->setText(
+            QStringLiteral("未找到可用的提权工具，请按 README 手动安装规则。"));
+        m_ruleHint->setStyleSheet(QStringLiteral("color: %1;").arg(Theme::Warning.name()));
+        return;
+    }
+
+    const ElevationTool tool = tools.first();
+    const bool interactive = tool.name == QStringLiteral("pkexec")
+        || tool.name == QStringLiteral("run0")
+        || tool.name == QStringLiteral("kdesu")
+        || !tool.askpass.isEmpty();
+    m_ruleHint->setText(interactive
+                            ? QStringLiteral("请在弹出的授权窗口中确认。")
+                            : QStringLiteral("正在通过 %1 安装…").arg(tool.name));
+
+    m_installProcess = new QProcess(this);
+    if (!tool.askpass.isEmpty()) {
+        QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+        env.insert(QStringLiteral("SUDO_ASKPASS"), tool.askpass);
+        m_installProcess->setProcessEnvironment(env);
+    }
+    connect(m_installProcess, &QProcess::errorOccurred, this,
+            [this](QProcess::ProcessError error) {
+                if (error == QProcess::FailedToStart)
+                    finishRuleInstall(false, QStringLiteral("无法启动提权工具。"));
+            });
+    connect(m_installProcess, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+            this, [this](int code, QProcess::ExitStatus status) {
+                if (!m_installProcess)
+                    return;
+                QString error =
+                    QString::fromUtf8(m_installProcess->readAllStandardError()).trimmed();
+                if (error.isEmpty() && (code == 126 || code == 127))
+                    error = QStringLiteral("授权被取消或未获得权限。");
+                finishRuleInstall(status == QProcess::NormalExit && code == 0, error);
+            });
+    m_installProcess->setProgram(tool.program);
+    m_installProcess->setArguments(tool.arguments);
+    m_installProcess->start();
+}
+
+void DevicePage::finishRuleInstall(bool ok, const QString &error)
+{
+    if (m_installProcess) {
+        m_installProcess->deleteLater();
+        m_installProcess = nullptr;
+    }
+    if (m_ruleTemp) {
+        m_ruleTemp->deleteLater();
+        m_ruleTemp = nullptr;
+    }
+
+    m_installRule->setText(QStringLiteral("安装规则"));
+    m_installRule->setEnabled(true);
+
+    if (ok) {
+        m_controller->refresh();
+        m_ruleStatus->setText(QStringLiteral("udev 规则已安装"));
+        m_ruleStatus->setStyleSheet(QStringLiteral("color: %1;").arg(Theme::Success.name()));
+        m_ruleHint->setText(QStringLiteral("已重新加载规则；如果仍无法访问键盘，请重新插拔一次。"));
+        m_ruleHint->setStyleSheet(QStringLiteral("color: #8B95A9;"));
+        m_installRule->setVisible(false);
+        return;
+    }
+
+    const bool canceled =
+        error.contains(QLatin1String("Not authorized"), Qt::CaseInsensitive)
+        || error.contains(QLatin1String("dismissed"), Qt::CaseInsensitive);
+    m_ruleHint->setText(canceled
+                            ? QStringLiteral("安装已取消。")
+                            : QStringLiteral("安装失败：%1")
+                                  .arg(error.isEmpty() ? QStringLiteral("未知错误") : error));
+    m_ruleHint->setStyleSheet(QStringLiteral("color: %1;").arg(Theme::Warning.name()));
+    m_installRule->setVisible(true);
 }
 
 void DevicePage::refreshUi()
@@ -1667,7 +1898,7 @@ void AboutPage::buildUi()
     texts->addWidget(makeLabel(
         QStringLiteral("Linux 下的 GANSS GS3108T-PRO 配置工具 · Qt 6 / C++26"),
         QStringLiteral("muted")));
-    texts->addWidget(makeLabel(QStringLiteral("v0.2.0"), QStringLiteral("muted")));
+    texts->addWidget(makeLabel(QStringLiteral("v0.2.1"), QStringLiteral("muted")));
     texts->addStretch();
     row->addLayout(texts, 1);
 
