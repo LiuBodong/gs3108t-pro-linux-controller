@@ -312,6 +312,286 @@ bool KeyboardController::sendLightWireless(int mode, int r, int g, int b,
     return ok;
 }
 
+bool KeyboardController::applySystemConfig(int response, int sleep,
+                                             bool disableWin, bool disableAltF4,
+                                             bool disableAltTab)
+{
+    if (m_busy)
+        return false;
+
+    setBusy(true);
+    QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+
+    bool ok = false;
+    if (!ensureActive()) {
+        ok = false;
+    } else if (m_active.isWireless()) {
+        fail(QStringLiteral("系统配置目前只能通过 USB 有线写入。"
+                            "请插上 USB 线，并确认键盘处于有线模式。"));
+    } else {
+        ok = sendSystemConfigUsb(response, sleep, disableWin, disableAltF4,
+                                 disableAltTab);
+    }
+
+    setBusy(false);
+    const QString message = ok
+        ? QStringLiteral("系统配置已应用")
+        : (m_lastError.isEmpty() ? QStringLiteral("系统配置写入失败") : m_lastError);
+    emit systemConfigApplied(ok, message);
+    return ok;
+}
+
+bool KeyboardController::sendSystemConfigUsb(int response, int sleep,
+                                             bool disableWin, bool disableAltF4,
+                                             bool disableAltTab)
+{
+    QString error;
+    const int fd = HidManager::openDevice(m_active, &error);
+    if (fd < 0) {
+        fail(error);
+        return false;
+    }
+
+    auto sendControl = [&](const QByteArray &data, const QString &label) -> bool {
+        QByteArray reply;
+        if (!HidManager::sendFeature(fd, data, &reply, &error)) {
+            fail(label + QStringLiteral("：") + error);
+            return false;
+        }
+        if (reply.size() >= 5 && static_cast<quint8>(reply.at(4)) != 1) {
+            fail(label + QStringLiteral("被键盘拒绝（回执 %1）。"
+                                        "请按一下键盘唤醒，确认处于有线模式后再试。")
+                          .arg(QString::fromLatin1(reply.toHex())));
+            return false;
+        }
+        return true;
+    };
+
+    bool ok = true;
+    QByteArray packet(64, '\0');
+
+    packet[0] = 0x04;
+    packet[1] = 0x18;
+    if (!sendControl(packet, QStringLiteral("进入设置会话")))
+        ok = false;
+
+    if (ok) {
+        packet.fill('\0');
+        packet[0] = 0x04;
+        packet[1] = 0x17;
+        packet[2] = 0x01;
+        packet[8] = 0x01;
+        if (!sendControl(packet, QStringLiteral("准备写入系统配置")))
+            ok = false;
+    }
+
+    if (ok) {
+        packet.fill('\0');
+        packet[0] = 0x00;
+        packet[1] = 0x01;
+        packet[2] = static_cast<char>(disableAltTab ? 1 : 0);
+        packet[3] = static_cast<char>(disableAltF4 ? 1 : 0);
+        packet[4] = static_cast<char>(disableWin ? 1 : 0);
+        packet[5] = 0x00;
+        packet[6] = static_cast<char>(qBound(0, sleep, 3));
+        packet[7] = 0x00;
+        packet[8] = static_cast<char>(qBound(1, response, 5));
+        packet[62] = static_cast<char>(0xAA);
+        packet[63] = static_cast<char>(0x55);
+
+        QByteArray reply;
+        if (!HidManager::sendFeature(fd, packet, &reply, &error)) {
+            fail(QStringLiteral("写入系统配置：") + error);
+            ok = false;
+        }
+    }
+
+    if (ok) {
+        packet.fill('\0');
+        packet[0] = 0x04;
+        packet[1] = 0x02;
+        if (!sendControl(packet, QStringLiteral("结束设置会话")))
+            ok = false;
+    }
+
+    HidManager::closeDevice(fd);
+    return ok;
+}
+
+bool KeyboardController::resetKeyboard(bool factoryReset)
+{
+    if (m_busy)
+        return false;
+
+    setBusy(true);
+    QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+
+    bool ok = false;
+    if (!ensureActive()) {
+        ok = false;
+    } else if (m_active.isWireless()) {
+        fail(QStringLiteral("重置和恢复出厂目前只能通过 USB 有线执行。"
+                            "请插上 USB 线，并确认键盘处于有线模式。"));
+    } else {
+        ok = true;
+        if (factoryReset && ok)
+            ok = clearPerKeyUsb();
+        if (ok)
+            ok = clearLightStoreUsb(0x11);
+        if (ok)
+            ok = clearLightStoreUsb(0x27);
+        if (factoryReset && ok)
+            ok = applyDefaultLightUsb();
+        if (factoryReset && ok)
+            ok = sendSystemConfigUsb(2, 2, false, false, false);
+    }
+
+    setBusy(false);
+    QString message;
+    if (ok) {
+        message = factoryReset ? QStringLiteral("键盘已恢复出厂设置")
+                               : QStringLiteral("键盘数据已重置");
+    } else {
+        message = m_lastError.isEmpty()
+            ? (factoryReset ? QStringLiteral("恢复出厂失败")
+                            : QStringLiteral("重置键盘失败"))
+            : m_lastError;
+    }
+    emit resetApplied(ok, message, factoryReset);
+    return ok;
+}
+
+bool KeyboardController::clearLightStoreUsb(int command)
+{
+    QString error;
+    const int fd = HidManager::openDevice(m_active, &error);
+    if (fd < 0) {
+        fail(error);
+        return false;
+    }
+
+    auto write = [&](const QByteArray &data, bool readback) -> bool {
+        QByteArray reply;
+        return HidManager::sendFeature(fd, data, readback ? &reply : nullptr, &error);
+    };
+
+    bool ok = true;
+    QByteArray packet(64, '\0');
+    packet[0] = 0x04;
+    packet[1] = 0x18;
+    if (!write(packet, true)) {
+        fail(QStringLiteral("进入重置会话：") + error);
+        ok = false;
+    }
+
+    if (ok) {
+        packet.fill('\0');
+        packet[0] = 0x04;
+        packet[1] = static_cast<char>(command & 0xFF);
+        packet[8] = 0x09;
+        if (!write(packet, true)) {
+            fail(QStringLiteral("准备清空灯光数据：") + error);
+            ok = false;
+        }
+    }
+
+    if (ok) {
+        const QByteArray zero(64, '\0');
+        for (int i = 0; i < 9 && ok; ++i) {
+            if (!write(zero, false)) {
+                fail(QStringLiteral("清空灯光数据：") + error);
+                ok = false;
+            }
+        }
+    }
+
+    if (ok) {
+        packet.fill('\0');
+        packet[0] = 0x04;
+        packet[1] = 0x02;
+        if (!write(packet, true)) {
+            fail(QStringLiteral("结束重置会话：") + error);
+            ok = false;
+        }
+    }
+
+    if (ok) {
+        packet.fill('\0');
+        packet[0] = 0x04;
+        packet[1] = static_cast<char>(0xF0);
+        if (!write(packet, true)) {
+            fail(QStringLiteral("保存重置结果：") + error);
+            ok = false;
+        }
+    }
+
+    HidManager::closeDevice(fd);
+    return ok;
+}
+
+bool KeyboardController::clearPerKeyUsb()
+{
+    QString error;
+    const int fd = HidManager::openDevice(m_active, &error);
+    if (fd < 0) {
+        fail(error);
+        return false;
+    }
+
+    auto write = [&](const QByteArray &data, bool readback) -> bool {
+        QByteArray reply;
+        return HidManager::sendFeature(fd, data, readback ? &reply : nullptr, &error);
+    };
+
+    bool ok = true;
+    QByteArray packet(64, '\0');
+    packet[0] = 0x04;
+    packet[1] = 0x19;
+    if (!write(packet, true)) {
+        fail(QStringLiteral("进入逐键灯光会话：") + error);
+        ok = false;
+    }
+
+    if (ok) {
+        packet.fill('\0');
+        packet[0] = 0x04;
+        packet[1] = 0x15;
+        packet[8] = 0x08;
+        if (!write(packet, true)) {
+            fail(QStringLiteral("准备清空逐键灯光：") + error);
+            ok = false;
+        }
+    }
+
+    if (ok) {
+        const QByteArray zero(64, '\0');
+        for (int i = 0; i < 8 && ok; ++i) {
+            if (!write(zero, false)) {
+                fail(QStringLiteral("清空逐键灯光：") + error);
+                ok = false;
+            }
+        }
+    }
+
+    if (ok) {
+        packet.fill('\0');
+        packet[0] = 0x04;
+        packet[1] = 0x02;
+        if (!write(packet, true)) {
+            fail(QStringLiteral("结束逐键灯光会话：") + error);
+            ok = false;
+        }
+    }
+
+    HidManager::closeDevice(fd);
+    return ok;
+}
+
+bool KeyboardController::applyDefaultLightUsb()
+{
+    return sendLightUsb(11, 0xFF, 0x00, 0x00, 5, 3, 0, 1);
+}
+
 bool KeyboardController::syncClock()
 {
     if (m_busy)

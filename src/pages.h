@@ -92,6 +92,30 @@ private:
     QTimer *m_timer = nullptr;
 };
 
+class SystemPage : public PageScroll {
+public:
+    explicit SystemPage(KeyboardController *controller, QWidget *parent = nullptr);
+
+private:
+    void buildUi();
+    void loadSettings();
+    void saveSettings();
+    void refreshAvailability();
+    void apply();
+    void reset(bool factory);
+
+    KeyboardController *m_controller = nullptr;
+    SegmentedControl *m_response = nullptr;
+    SegmentedControl *m_sleep = nullptr;
+    ToggleSwitch *m_win = nullptr;
+    ToggleSwitch *m_altf4 = nullptr;
+    ToggleSwitch *m_alttab = nullptr;
+    QPushButton *m_apply = nullptr;
+    QPushButton *m_reset = nullptr;
+    QPushButton *m_factoryReset = nullptr;
+    QLabel *m_availability = nullptr;
+};
+
 class DevicePage : public PageScroll {
 public:
     explicit DevicePage(KeyboardController *controller, QWidget *parent = nullptr);

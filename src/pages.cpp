@@ -19,6 +19,7 @@
 #include <QPushButton>
 #include <QResizeEvent>
 #include <QScrollBar>
+#include <QSettings>
 #include <QSignalBlocker>
 #include <QTime>
 #include <QTimer>
@@ -692,6 +693,230 @@ void ClockPage::updateClock()
                     + weekdays.at(index));
 }
 
+SystemPage::SystemPage(KeyboardController *controller, QWidget *parent)
+    : PageScroll(parent)
+    , m_controller(controller)
+{
+    buildUi();
+    loadSettings();
+    refreshAvailability();
+    connect(m_controller, &KeyboardController::stateChanged, this,
+            &SystemPage::refreshAvailability);
+}
+
+void SystemPage::buildUi()
+{
+    auto *behaviourCard = new CardFrame;
+    behaviourCard->body()->addWidget(makeLabel(QStringLiteral("按键行为"),
+                                               QStringLiteral("cardTitle")));
+    behaviourCard->body()->addWidget(makeLabel(
+        QStringLiteral("响应档位越高，键盘去抖时间越短；休眠时间到点后键盘进入省电状态。"),
+        QStringLiteral("tiny")));
+    behaviourCard->body()->addWidget(makeDivider());
+
+    auto *responseRow = new QHBoxLayout;
+    responseRow->setSpacing(14);
+    auto *responseTexts = new QVBoxLayout;
+    responseTexts->setSpacing(4);
+    responseTexts->addWidget(makeLabel(QStringLiteral("按键响应时间"), {}, 13, Theme::Text));
+    responseTexts->addWidget(makeLabel(QStringLiteral("1 档最稳，5 档最快（约 17ms）。"),
+                                       QStringLiteral("tiny")));
+    responseRow->addLayout(responseTexts, 1);
+    m_response = new SegmentedControl({QStringLiteral("1"), QStringLiteral("2"),
+                                       QStringLiteral("3"), QStringLiteral("4"),
+                                       QStringLiteral("5")});
+    m_response->setFixedWidth(300);
+    responseRow->addWidget(m_response, 0, Qt::AlignVCenter);
+    behaviourCard->body()->addLayout(responseRow);
+    behaviourCard->body()->addWidget(makeDivider());
+
+    auto *sleepRow = new QHBoxLayout;
+    sleepRow->setSpacing(14);
+    auto *sleepTexts = new QVBoxLayout;
+    sleepTexts->setSpacing(4);
+    sleepTexts->addWidget(makeLabel(QStringLiteral("键盘休眠时间"), {}, 13, Theme::Text));
+    sleepTexts->addWidget(makeLabel(QStringLiteral("无线模式下建议不要设为「不休眠」，会影响续航。"),
+                                    QStringLiteral("tiny")));
+    sleepRow->addLayout(sleepTexts, 1);
+    m_sleep = new SegmentedControl({QStringLiteral("不休眠"), QStringLiteral("1 分钟"),
+                                    QStringLiteral("5 分钟"), QStringLiteral("30 分钟")});
+    m_sleep->setFixedWidth(360);
+    sleepRow->addWidget(m_sleep, 0, Qt::AlignVCenter);
+    behaviourCard->body()->addLayout(sleepRow);
+    contentLayout()->addWidget(behaviourCard);
+
+    auto *disableCard = new CardFrame;
+    disableCard->body()->addWidget(makeLabel(QStringLiteral("禁用按键"),
+                                             QStringLiteral("cardTitle")));
+    disableCard->body()->addWidget(makeLabel(
+        QStringLiteral("直接写进键盘固件，换电脑或换系统后依然生效。"),
+        QStringLiteral("tiny")));
+    disableCard->body()->addWidget(makeDivider());
+
+    auto addSwitchRow = [&](const QString &title, const QString &subtitle,
+                            ToggleSwitch **target) {
+        auto *row = new QHBoxLayout;
+        row->setSpacing(14);
+        auto *texts = new QVBoxLayout;
+        texts->setSpacing(4);
+        texts->addWidget(makeLabel(title, {}, 13, Theme::Text));
+        texts->addWidget(makeLabel(subtitle, QStringLiteral("tiny")));
+        row->addLayout(texts, 1);
+        auto *toggle = new ToggleSwitch;
+        *target = toggle;
+        row->addWidget(toggle, 0, Qt::AlignVCenter);
+        disableCard->body()->addLayout(row);
+        return row;
+    };
+
+    addSwitchRow(QStringLiteral("禁用 Windows 键"),
+                 QStringLiteral("避免游戏中误触 Win 键弹出开始菜单。"), &m_win);
+    disableCard->body()->addWidget(makeDivider());
+    addSwitchRow(QStringLiteral("禁用 ALT+F4"),
+                 QStringLiteral("阻止用 ALT+F4 关闭当前窗口。"), &m_altf4);
+    disableCard->body()->addWidget(makeDivider());
+    addSwitchRow(QStringLiteral("禁用 ALT+TAB"),
+                 QStringLiteral("阻止用 ALT+TAB 切换窗口。"), &m_alttab);
+    contentLayout()->addWidget(disableCard);
+
+    auto *applyCard = new CardFrame;
+    applyCard->body()->addWidget(makeLabel(QStringLiteral("应用到键盘"),
+                                           QStringLiteral("cardTitle")));
+    m_availability = makeLabel(QString(), QStringLiteral("tiny"));
+    m_availability->setWordWrap(true);
+    applyCard->body()->addWidget(m_availability);
+
+    auto *applyRow = new QHBoxLayout;
+    applyRow->setSpacing(14);
+    auto *note = makeLabel(QStringLiteral("写入后立即生效，不需要额外保存。"),
+                           QStringLiteral("tiny"));
+    note->setWordWrap(true);
+    applyRow->addWidget(note, 1);
+    m_apply = new QPushButton(QStringLiteral("应用到键盘"));
+    m_apply->setObjectName(QStringLiteral("primary"));
+    m_apply->setFixedSize(180, 48);
+    m_apply->setCursor(Qt::PointingHandCursor);
+    connect(m_apply, &QPushButton::clicked, this, &SystemPage::apply);
+    applyRow->addWidget(m_apply, 0, Qt::AlignVCenter);
+    applyCard->body()->addLayout(applyRow);
+    contentLayout()->addWidget(applyCard);
+
+    auto *dangerCard = new CardFrame;
+    dangerCard->body()->addWidget(makeLabel(QStringLiteral("危险操作"),
+                                            QStringLiteral("cardTitle")));
+    auto *dangerHint = makeLabel(
+        QStringLiteral("「重置键盘」会清空键盘上的用户灯光和自定义灯光数据；"
+                       "「恢复出厂」还会清掉逐键灯光，并把灯效和系统配置恢复默认。"),
+        QStringLiteral("tiny"));
+    dangerHint->setWordWrap(true);
+    dangerCard->body()->addWidget(dangerHint);
+
+    auto *dangerRow = new QHBoxLayout;
+    dangerRow->setSpacing(10);
+    dangerRow->addStretch();
+
+    m_reset = new QPushButton(QStringLiteral("重置键盘"));
+    m_reset->setObjectName(QStringLiteral("ghost"));
+    m_reset->setMinimumHeight(40);
+    m_reset->setCursor(Qt::PointingHandCursor);
+    connect(m_reset, &QPushButton::clicked, this, [this]() { reset(false); });
+    dangerRow->addWidget(m_reset);
+
+    m_factoryReset = new QPushButton(QStringLiteral("恢复出厂"));
+    m_factoryReset->setObjectName(QStringLiteral("danger"));
+    m_factoryReset->setMinimumHeight(40);
+    m_factoryReset->setCursor(Qt::PointingHandCursor);
+    connect(m_factoryReset, &QPushButton::clicked, this, [this]() { reset(true); });
+    dangerRow->addWidget(m_factoryReset);
+
+    dangerCard->body()->addLayout(dangerRow);
+    contentLayout()->addWidget(dangerCard);
+
+    contentLayout()->addStretch();
+}
+
+void SystemPage::loadSettings()
+{
+    QSettings settings;
+    const int response = qBound(1, settings.value(QStringLiteral("system/response"), 2).toInt(), 5);
+    const int sleep = qBound(0, settings.value(QStringLiteral("system/sleep"), 2).toInt(), 3);
+    m_response->setCurrentIndex(response - 1);
+    m_sleep->setCurrentIndex(sleep);
+    m_win->setChecked(settings.value(QStringLiteral("system/disableWin"), false).toBool(), false);
+    m_altf4->setChecked(settings.value(QStringLiteral("system/disableAltF4"), false).toBool(), false);
+    m_alttab->setChecked(settings.value(QStringLiteral("system/disableAltTab"), false).toBool(), false);
+}
+
+void SystemPage::saveSettings()
+{
+    QSettings settings;
+    settings.setValue(QStringLiteral("system/response"), m_response->currentIndex() + 1);
+    settings.setValue(QStringLiteral("system/sleep"), m_sleep->currentIndex());
+    settings.setValue(QStringLiteral("system/disableWin"), m_win->isChecked());
+    settings.setValue(QStringLiteral("system/disableAltF4"), m_altf4->isChecked());
+    settings.setValue(QStringLiteral("system/disableAltTab"), m_alttab->isChecked());
+}
+
+void SystemPage::refreshAvailability()
+{
+    const bool connected = m_controller->connected();
+    const bool wireless = m_controller->connectionType() == QStringLiteral("wireless");
+    const bool canWrite = connected && !wireless && !m_controller->busy();
+    m_apply->setEnabled(canWrite);
+    m_reset->setEnabled(canWrite);
+    m_factoryReset->setEnabled(canWrite);
+
+    if (!connected) {
+        m_availability->setText(QStringLiteral("当前未连接键盘。请插上 USB 线，或插入 2.4G 接收器。"));
+        m_availability->setStyleSheet(QStringLiteral("color: #F0A23C;"));
+    } else if (wireless) {
+        m_availability->setText(QStringLiteral(
+            "当前连接：2.4G 无线。系统配置暂时只能通过 USB 有线写入——请插上 USB 线，"
+            "并确认键盘处于有线模式。灯光和校时在 2.4G 下仍然可用。"));
+        m_availability->setStyleSheet(QStringLiteral("color: #F0A23C;"));
+    } else {
+        m_availability->setText(QStringLiteral("当前连接：USB 有线。配置会直接写入键盘固件。"));
+        m_availability->setStyleSheet(QStringLiteral("color: #5FD0A0;"));
+    }
+}
+
+void SystemPage::apply()
+{
+    const int response = m_response->currentIndex() + 1;
+    const int sleep = m_sleep->currentIndex();
+    const bool ok = m_controller->applySystemConfig(response, sleep,
+                                                    m_win->isChecked(),
+                                                    m_altf4->isChecked(),
+                                                    m_alttab->isChecked());
+    if (ok)
+        saveSettings();
+}
+
+void SystemPage::reset(bool factory)
+{
+    const QString title = factory ? QStringLiteral("恢复出厂设置")
+                                  : QStringLiteral("重置键盘");
+    const QString text = factory
+        ? QStringLiteral("会清空键盘上的所有灯光数据，并把灯效和系统配置恢复默认。确定继续？")
+        : QStringLiteral("会清空键盘上的用户灯光和自定义灯光数据。确定继续？");
+    const QString accept = factory ? QStringLiteral("恢复出厂")
+                                   : QStringLiteral("重置");
+    if (!AppDialog::confirm(this, title, text, accept, QStringLiteral("取消")))
+        return;
+
+    if (!m_controller->resetKeyboard(factory))
+        return;
+
+    if (factory) {
+        m_response->setCurrentIndex(1);
+        m_sleep->setCurrentIndex(2);
+        m_win->setChecked(false, false);
+        m_altf4->setChecked(false, false);
+        m_alttab->setChecked(false, false);
+        saveSettings();
+    }
+}
+
 DevicePage::DevicePage(KeyboardController *controller, QWidget *parent)
     : PageScroll(parent)
     , m_controller(controller)
@@ -971,6 +1196,8 @@ void AboutPage::buildUi()
          QStringLiteral("已支持"), true},
         {QStringLiteral("我的专属配置（本地预设，一键应用）"), QStringLiteral("已支持"), true},
         {QStringLiteral("TFT 时钟同步"), QStringLiteral("已支持"), true},
+        {QStringLiteral("系统配置（响应 / 休眠 / 禁用按键）"), QStringLiteral("USB 已验证"), true},
+        {QStringLiteral("重置键盘 / 恢复出厂"), QStringLiteral("USB 已验证"), true},
         {QStringLiteral("USB 有线 / 2.4G 无线自动识别"), QStringLiteral("已支持"), true},
         {QStringLiteral("2.4G 灯效写入"), QStringLiteral("实测通过"), true},
         {QStringLiteral("用户灯光 / 自定义灯光（逐键 RGB）"), QStringLiteral("逆向中"), false},

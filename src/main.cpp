@@ -56,6 +56,23 @@ int main(int argc, char *argv[])
         return ok ? 0 : 1;
     }
 
+    if (args.contains(QStringLiteral("--config-test"))) {
+        const bool ok = controller.applySystemConfig(3, 1, false, false, false);
+        qInfo().noquote() << (ok ? "系统配置测试已发送" : "系统配置测试失败")
+                          << controller.lastError();
+        return ok ? 0 : 1;
+    }
+
+    if (args.contains(QStringLiteral("--reset-keyboard"))
+        || args.contains(QStringLiteral("--factory-reset"))) {
+        const bool factory = args.contains(QStringLiteral("--factory-reset"));
+        const bool ok = controller.resetKeyboard(factory);
+        qInfo().noquote() << (ok ? (factory ? "恢复出厂已发送" : "重置键盘已发送")
+                                 : (factory ? "恢复出厂失败" : "重置键盘失败"))
+                          << controller.lastError();
+        return ok ? 0 : 1;
+    }
+
     if (args.contains(QStringLiteral("--clock-test"))) {
         const bool ok = controller.syncClock();
         qInfo().noquote() << (ok ? "校时已发送" : "校时失败")
