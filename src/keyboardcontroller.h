@@ -41,6 +41,7 @@ public:
                                        bool disableWin, bool disableAltF4,
                                        bool disableAltTab);
     Q_INVOKABLE bool resetKeyboard(bool factoryReset);
+    Q_INVOKABLE bool uploadGif(const QString &path);
     Q_INVOKABLE bool syncClock();
     Q_INVOKABLE bool applyTestLight();
 
@@ -50,6 +51,8 @@ signals:
     void lightApplied(bool ok, const QString &message);
     void systemConfigApplied(bool ok, const QString &message);
     void resetApplied(bool ok, const QString &message, bool factoryReset);
+    void gifUploadProgress(int percent);
+    void gifUploaded(bool ok, const QString &message);
     void clockSynced(bool ok, const QString &message);
 
 private:

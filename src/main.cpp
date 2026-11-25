@@ -56,6 +56,22 @@ int main(int argc, char *argv[])
         return ok ? 0 : 1;
     }
 
+    const int gifIndex = args.indexOf(QStringLiteral("--gif-upload"));
+    if (gifIndex >= 0 && gifIndex + 1 < args.size()) {
+        int lastPercent = -1;
+        QObject::connect(&controller, &KeyboardController::gifUploadProgress,
+                         [&lastPercent](int percent) {
+                             if (percent / 10 != lastPercent / 10) {
+                                 lastPercent = percent;
+                                 qInfo().noquote() << QStringLiteral("上传进度 %1%").arg(percent);
+                             }
+                         });
+        const bool ok = controller.uploadGif(args.at(gifIndex + 1));
+        qInfo().noquote() << (ok ? "动图已上传" : "动图上传失败")
+                          << controller.lastError();
+        return ok ? 0 : 1;
+    }
+
     if (args.contains(QStringLiteral("--config-test"))) {
         const bool ok = controller.applySystemConfig(3, 1, false, false, false);
         qInfo().noquote() << (ok ? "系统配置测试已发送" : "系统配置测试失败")

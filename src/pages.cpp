@@ -6,12 +6,17 @@
 
 #include <QClipboard>
 #include <QDate>
+#include <QFileDialog>
+#include <QFileInfo>
 #include <QFrame>
 #include <QGraphicsDropShadowEffect>
 #include <QGridLayout>
 #include <QGuiApplication>
 #include <QHBoxLayout>
+#include <QImageReader>
 #include <QLabel>
+#include <QMovie>
+#include <QProgressBar>
 #include <QLineEdit>
 #include <QLinearGradient>
 #include <QPainter>
@@ -693,6 +698,190 @@ void ClockPage::updateClock()
                     + weekdays.at(index));
 }
 
+GifPage::GifPage(KeyboardController *controller, QWidget *parent)
+    : PageScroll(parent)
+    , m_controller(controller)
+{
+    buildUi();
+    refreshAvailability();
+
+    connect(m_controller, &KeyboardController::stateChanged, this,
+            &GifPage::refreshAvailability);
+    connect(m_controller, &KeyboardController::gifUploadProgress, this,
+            [this](int percent) { m_progress->setValue(percent); });
+    connect(m_controller, &KeyboardController::gifUploaded, this,
+            [this](bool ok, const QString &) {
+                if (!ok)
+                    m_progress->setValue(0);
+                m_choose->setEnabled(true);
+                refreshAvailability();
+            });
+}
+
+void GifPage::buildUi()
+{
+    auto *card = new CardFrame;
+    card->body()->addWidget(makeLabel(QStringLiteral("TFT 动图"),
+                                      QStringLiteral("cardTitle")));
+    auto *hint = makeLabel(
+        QStringLiteral("选择 GIF 或静态图片后会按 240×135 转成 RGB565 写入键盘。"
+                       "动图最多 108 帧，超过的部分会被截断；单张图片按 1 帧处理。"),
+        QStringLiteral("tiny"));
+    hint->setWordWrap(true);
+    card->body()->addWidget(hint);
+    card->body()->addWidget(makeDivider());
+
+    m_preview = new QLabel(QStringLiteral("未选择 GIF"));
+    m_preview->setFixedSize(320, 180);
+    m_preview->setAlignment(Qt::AlignCenter);
+    m_preview->setStyleSheet(
+        QStringLiteral("background-color: #0B0F16; border: 1px solid #1C2331; "
+                       "border-radius: 12px; color: #5E697C;"));
+
+    auto *side = new QVBoxLayout;
+    side->setSpacing(8);
+    m_fileLabel = makeLabel(QStringLiteral("还没有选择文件"), QStringLiteral("mono"));
+    m_fileLabel->setWordWrap(true);
+    m_infoLabel = makeLabel(QString(), QStringLiteral("tiny"));
+    m_infoLabel->setWordWrap(true);
+    m_choose = new QPushButton(QStringLiteral("选择 GIF..."));
+    m_choose->setObjectName(QStringLiteral("ghost"));
+    m_choose->setMinimumHeight(38);
+    m_choose->setCursor(Qt::PointingHandCursor);
+    connect(m_choose, &QPushButton::clicked, this, &GifPage::chooseFile);
+    side->addWidget(m_fileLabel);
+    side->addWidget(m_infoLabel);
+    side->addWidget(m_choose, 0, Qt::AlignLeft);
+    side->addStretch();
+
+    auto *previewRow = new QHBoxLayout;
+    previewRow->setSpacing(18);
+    previewRow->addWidget(m_preview, 0, Qt::AlignTop);
+    previewRow->addLayout(side, 1);
+    card->body()->addLayout(previewRow);
+    contentLayout()->addWidget(card);
+
+    auto *applyCard = new CardFrame;
+    applyCard->body()->addWidget(makeLabel(QStringLiteral("应用到键盘"),
+                                           QStringLiteral("cardTitle")));
+    m_availability = makeLabel(QString(), QStringLiteral("tiny"));
+    m_availability->setWordWrap(true);
+    applyCard->body()->addWidget(m_availability);
+
+    m_progress = new QProgressBar;
+    m_progress->setObjectName(QStringLiteral("uploadProgress"));
+    m_progress->setRange(0, 100);
+    m_progress->setValue(0);
+    m_progress->setTextVisible(false);
+    m_progress->setFixedHeight(10);
+    applyCard->body()->addWidget(m_progress);
+
+    auto *row = new QHBoxLayout;
+    row->addStretch();
+    m_upload = new QPushButton(QStringLiteral("上传到键盘"));
+    m_upload->setObjectName(QStringLiteral("primary"));
+    m_upload->setFixedSize(180, 48);
+    m_upload->setCursor(Qt::PointingHandCursor);
+    connect(m_upload, &QPushButton::clicked, this, &GifPage::upload);
+    row->addWidget(m_upload);
+    applyCard->body()->addLayout(row);
+    contentLayout()->addWidget(applyCard);
+    contentLayout()->addStretch();
+}
+
+void GifPage::chooseFile()
+{
+    QFileDialog dialog(this, QStringLiteral("选择动图或图片"));
+    dialog.setOption(QFileDialog::DontUseNativeDialog, true);
+    dialog.setFileMode(QFileDialog::ExistingFile);
+    dialog.setAcceptMode(QFileDialog::AcceptOpen);
+    dialog.setNameFilters({
+        QStringLiteral("GIF / 图片 (*.gif *.png *.jpg *.jpeg *.bmp *.webp)"),
+        QStringLiteral("所有文件 (*)"),
+    });
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+    const QString path = dialog.selectedFiles().value(0);
+    if (path.isEmpty())
+        return;
+    m_path = path;
+    loadPreview();
+    refreshAvailability();
+}
+
+void GifPage::loadPreview()
+{
+    QImageReader reader(m_path);
+    if (!reader.canRead()) {
+        m_infoLabel->setText(QStringLiteral("无法读取：%1").arg(reader.errorString()));
+        return;
+    }
+
+    const int count = reader.imageCount();
+    const QSize size = reader.size();
+    QString info = count > 1 ? QStringLiteral("帧数 %1").arg(count)
+                             : QStringLiteral("单帧图片");
+    if (size.isValid())
+        info += QStringLiteral(" · %1×%2").arg(size.width()).arg(size.height());
+    if (count > 108)
+        info += QStringLiteral(" · 只上传前 108 帧");
+    m_infoLabel->setText(info);
+    m_fileLabel->setText(QFileInfo(m_path).fileName());
+
+    if (m_movie) {
+        m_movie->stop();
+        m_movie->deleteLater();
+        m_movie = nullptr;
+    }
+
+    if (count > 1) {
+        m_movie = new QMovie(m_path, QByteArray(), this);
+        m_movie->setCacheMode(QMovie::CacheAll);
+        m_movie->setScaledSize(m_preview->size());
+        m_preview->setMovie(m_movie);
+        m_movie->start();
+    } else {
+        const QImage image = reader.read();
+        m_preview->setPixmap(QPixmap::fromImage(image).scaled(
+            m_preview->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    }
+}
+
+void GifPage::upload()
+{
+    if (m_path.isEmpty())
+        return;
+    m_choose->setEnabled(false);
+    m_upload->setEnabled(false);
+    m_progress->setValue(0);
+    m_controller->uploadGif(m_path);
+}
+
+void GifPage::refreshAvailability()
+{
+    const bool connected = m_controller->connected();
+    const bool wireless = m_controller->connectionType() == QStringLiteral("wireless");
+    const bool busy = m_controller->busy();
+    const bool usable = connected && !wireless && !busy;
+
+    m_upload->setEnabled(usable && !m_path.isEmpty());
+    m_choose->setEnabled(!busy);
+
+    if (!connected) {
+        m_availability->setText(QStringLiteral("当前未连接键盘。请插上 USB 线。"));
+        m_availability->setStyleSheet(QStringLiteral("color: #F0A23C;"));
+    } else if (wireless) {
+        m_availability->setText(QStringLiteral(
+            "当前连接：2.4G 无线。TFT 动图目前只能通过 USB 有线写入——请插上 USB 线，"
+            "并确认键盘处于有线模式。"));
+        m_availability->setStyleSheet(QStringLiteral("color: #F0A23C;"));
+    } else {
+        m_availability->setText(QStringLiteral(
+            "当前连接：USB 有线。上传期间不要拔线；单帧约几秒，108 帧约 4 分钟。"));
+        m_availability->setStyleSheet(QStringLiteral("color: #5FD0A0;"));
+    }
+}
+
 SystemPage::SystemPage(KeyboardController *controller, QWidget *parent)
     : PageScroll(parent)
     , m_controller(controller)
@@ -1196,6 +1385,7 @@ void AboutPage::buildUi()
          QStringLiteral("已支持"), true},
         {QStringLiteral("我的专属配置（本地预设，一键应用）"), QStringLiteral("已支持"), true},
         {QStringLiteral("TFT 时钟同步"), QStringLiteral("已支持"), true},
+        {QStringLiteral("TFT 动图（GIF 上传）"), QStringLiteral("USB 已验证"), true},
         {QStringLiteral("系统配置（响应 / 休眠 / 禁用按键）"), QStringLiteral("USB 已验证"), true},
         {QStringLiteral("重置键盘 / 恢复出厂"), QStringLiteral("USB 已验证"), true},
         {QStringLiteral("USB 有线 / 2.4G 无线自动识别"), QStringLiteral("已支持"), true},

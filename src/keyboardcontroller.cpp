@@ -4,7 +4,12 @@
 #include <QDateTime>
 #include <QDebug>
 #include <QEventLoop>
+#include <QImage>
+#include <QImageReader>
+#include <QPainter>
 #include <QSettings>
+
+#include <cstring>
 
 static QString joinSizes(const QList<int> &sizes)
 {
@@ -590,6 +595,184 @@ bool KeyboardController::clearPerKeyUsb()
 bool KeyboardController::applyDefaultLightUsb()
 {
     return sendLightUsb(11, 0xFF, 0x00, 0x00, 5, 3, 0, 1);
+}
+
+bool KeyboardController::uploadGif(const QString &path)
+{
+    if (m_busy)
+        return false;
+
+    setBusy(true);
+    QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+
+    bool ok = false;
+    QString error;
+
+    do {
+        if (!ensureActive()) {
+            ok = false;
+            break;
+        }
+        if (m_active.isWireless()) {
+            fail(QStringLiteral("TFT 动图目前只能通过 USB 有线写入。"
+                                "请插上 USB 线，并确认键盘处于有线模式。"));
+            break;
+        }
+
+        HidInterface bulk;
+        for (const HidInterface &dev : m_devices) {
+            if (dev.usagePage == 0xFF68 && dev.outputSizes.contains(4096)) {
+                bulk = dev;
+                break;
+            }
+        }
+        if (bulk.node.isEmpty()) {
+            fail(QStringLiteral("没有找到动图传输接口（usage 0xFF68 / 4096 字节 Output）。"
+                                "请重新插拔 USB 线后再试。"));
+            break;
+        }
+
+        QImageReader reader(path);
+        if (!reader.canRead()) {
+            fail(QStringLiteral("无法读取 GIF：%1").arg(reader.errorString()));
+            break;
+        }
+        if (reader.imageCount() <= 0) {
+            fail(QStringLiteral("这个文件里没有可用的图像帧。"));
+            break;
+        }
+
+        constexpr int kWidth = 240;
+        constexpr int kHeight = 135;
+        constexpr int kMaxFrames = 108;
+
+        QVector<QImage> frames;
+        QVector<int> delays;
+        while (reader.canRead() && frames.size() < kMaxFrames) {
+            const QImage source = reader.read();
+            if (source.isNull())
+                break;
+            const int delay = reader.nextImageDelay();
+            delays.append(delay > 0 ? delay : 1000);
+
+            QImage canvas(kWidth, kHeight, QImage::Format_RGB32);
+            canvas.fill(Qt::black);
+            const QImage scaled = source.scaled(kWidth, kHeight, Qt::KeepAspectRatio,
+                                                Qt::SmoothTransformation);
+            QPainter painter(&canvas);
+            painter.drawImage((kWidth - scaled.width()) / 2,
+                              (kHeight - scaled.height()) / 2, scaled);
+            painter.end();
+            frames.append(canvas);
+        }
+
+        if (frames.isEmpty()) {
+            fail(QStringLiteral("GIF 里没有可用帧。"));
+            break;
+        }
+
+        QByteArray blob(256, '\xFF');
+        blob[0] = static_cast<char>(frames.size());
+        for (int i = 0; i < frames.size(); ++i)
+            blob[1 + i] = static_cast<char>(qBound(0, delays.at(i) / 2, 255));
+
+        for (const QImage &image : frames) {
+            for (int y = 0; y < image.height(); ++y) {
+                const auto *line = reinterpret_cast<const QRgb *>(image.constScanLine(y));
+                for (int x = 0; x < image.width(); ++x) {
+                    const QRgb color = line[x];
+                    const quint16 rgb565 = static_cast<quint16>(
+                        ((qRed(color) >> 3) << 11)
+                        | ((qGreen(color) >> 2) << 5)
+                        | (qBlue(color) >> 3));
+                    blob.append(static_cast<char>(rgb565 & 0xFF));
+                    blob.append(static_cast<char>((rgb565 >> 8) & 0xFF));
+                }
+            }
+        }
+
+        const int chunks = (blob.size() + 4095) / 4096;
+        blob.append(QByteArray(chunks * 4096 - blob.size(), '\xFF'));
+
+        const int cfgFd = HidManager::openDevice(m_active, &error);
+        if (cfgFd < 0) {
+            fail(error);
+            break;
+        }
+        const int bulkFd = HidManager::openDevice(bulk, &error);
+        if (bulkFd < 0) {
+            HidManager::closeDevice(cfgFd);
+            fail(error);
+            break;
+        }
+
+        auto sendControl = [&](const QByteArray &data, const QString &label) -> bool {
+            QByteArray reply;
+            if (!HidManager::sendFeature(cfgFd, data, &reply, &error)) {
+                fail(label + QStringLiteral("：") + error);
+                return false;
+            }
+            if (reply.size() >= 5 && static_cast<quint8>(reply.at(4)) != 1) {
+                fail(label + QStringLiteral("被键盘拒绝（回执 %1）。"
+                                            "请按一下键盘唤醒后重试。")
+                              .arg(QString::fromLatin1(reply.toHex())));
+                return false;
+            }
+            return true;
+        };
+
+        ok = true;
+        QByteArray packet(64, '\0');
+
+        packet[0] = 0x04;
+        packet[1] = 0x18;
+        if (!sendControl(packet, QStringLiteral("进入动图会话")))
+            ok = false;
+
+        if (ok) {
+            packet.fill('\0');
+            packet[0] = 0x04;
+            packet[1] = 0x72;
+            packet[2] = 0x01;
+            packet[8] = static_cast<char>(chunks & 0xFF);
+            packet[9] = static_cast<char>((chunks >> 8) & 0xFF);
+            if (!sendControl(packet, QStringLiteral("准备上传动图")))
+                ok = false;
+        }
+
+        if (ok) {
+            QByteArray frame(4097, '\0');
+            for (int i = 0; i < chunks && ok; ++i) {
+                std::memcpy(frame.data() + 1, blob.constData() + i * 4096, 4096);
+                QByteArray ack;
+                if (!HidManager::sendOutput(bulkFd, frame, &ack, 300, &error)) {
+                    fail(QStringLiteral("写入动图分块：") + error);
+                    ok = false;
+                    break;
+                }
+                emit gifUploadProgress(static_cast<int>((i + 1) * 100LL / chunks));
+                QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+            }
+        }
+
+        if (ok) {
+            packet.fill('\0');
+            packet[0] = 0x04;
+            packet[1] = 0x02;
+            if (!sendControl(packet, QStringLiteral("结束动图会话")))
+                ok = false;
+        }
+
+        HidManager::closeDevice(bulkFd);
+        HidManager::closeDevice(cfgFd);
+    } while (false);
+
+    setBusy(false);
+    const QString message = ok
+        ? QStringLiteral("动图已上传到键盘")
+        : (m_lastError.isEmpty() ? QStringLiteral("动图上传失败") : m_lastError);
+    emit gifUploaded(ok, message);
+    return ok;
 }
 
 bool KeyboardController::syncClock()

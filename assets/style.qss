@@ -289,3 +289,67 @@ QPushButton#danger:hover {
 QPushButton#danger:pressed {
     background-color: #C23A3A;
 }
+
+QProgressBar#uploadProgress {
+    background-color: #10161F;
+    border: 1px solid #1C2331;
+    border-radius: 5px;
+}
+
+QProgressBar#uploadProgress::chunk {
+    background-color: #6E8BFF;
+    border-radius: 4px;
+}
+
+QFileDialog {
+    background-color: #0F141D;
+    color: #E7ECF5;
+}
+
+QFileDialog QLabel {
+    color: #C9D2E3;
+}
+
+QFileDialog QListView, QFileDialog QTreeView {
+    background-color: #0B0F16;
+    color: #E7ECF5;
+    border: 1px solid #1C2331;
+    selection-background-color: #2A3550;
+    selection-color: #FFFFFF;
+}
+
+QFileDialog QHeaderView::section {
+    background-color: #141A25;
+    color: #8B95A9;
+    border: none;
+    padding: 4px 6px;
+}
+
+QFileDialog QLineEdit, QFileDialog QComboBox {
+    background-color: #0B0F16;
+    color: #E7ECF5;
+    border: 1px solid #252D3D;
+    border-radius: 6px;
+    padding: 4px 6px;
+}
+
+QFileDialog QPushButton {
+    background-color: #141A25;
+    color: #E7ECF5;
+    border: 1px solid #252D3D;
+    border-radius: 8px;
+    padding: 6px 14px;
+}
+
+QFileDialog QPushButton:hover {
+    background-color: #1B2230;
+}
+
+QFileDialog QToolButton {
+    color: #C9D2E3;
+}
+
+QFileDialog QComboBox QAbstractItemView {
+    background-color: #10161F;
+    color: #E7ECF5;
+}

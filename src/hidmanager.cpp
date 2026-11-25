@@ -180,6 +180,20 @@ bool HidManager::sendOutput(int fd, const QByteArray &frame,
                             QByteArray *response, int timeoutMs, QString *error)
 {
     ssize_t n = ::write(fd, frame.constData(), static_cast<size_t>(frame.size()));
+    if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+        // 大块 Output（GIF 的 4097 字节）可能暂时写不进去，等设备腾出缓冲再重试。
+        for (int attempt = 0; attempt < 50 && n < 0; ++attempt) {
+            struct pollfd pfd;
+            pfd.fd = fd;
+            pfd.events = POLLOUT;
+            pfd.revents = 0;
+            if (::poll(&pfd, 1, 100) <= 0)
+                continue;
+            n = ::write(fd, frame.constData(), static_cast<size_t>(frame.size()));
+            if (n >= 0 || (errno != EAGAIN && errno != EWOULDBLOCK))
+                break;
+        }
+    }
     if (n < 0 && (errno == EINVAL || errno == EMSGSIZE) && frame.size() == 33) {
         // Some kernels expect the 32 data bytes without the report-ID byte.
         n = ::write(fd, frame.constData() + 1, 32);

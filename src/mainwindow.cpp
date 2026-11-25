@@ -136,12 +136,13 @@ Sidebar::Sidebar(KeyboardController *controller, QWidget *parent)
     const NavItem items[] = {
         {":/assets/icons/light.svg", "灯光控制"},
         {":/assets/icons/clock.svg", "TFT 时钟"},
+        {":/assets/icons/palette.svg", "TFT 动图"},
         {":/assets/icons/keyboard.svg", "系统配置"},
         {":/assets/icons/device.svg", "设备与连接"},
         {":/assets/icons/about.svg", "关于"}
     };
 
-    for (int i = 0; i < 5; ++i) {
+    for (int i = 0; i < 6; ++i) {
         auto *button = new NavButton(QString::fromLatin1(items[i].icon),
                                      QString::fromUtf8(items[i].label));
         connect(button, &NavButton::clicked, this, [this, i]() {
@@ -258,6 +259,10 @@ MainWindow::MainWindow(KeyboardController *controller, QWidget *parent)
             [this](bool ok, const QString &message, bool) {
                 m_toast->showMessage(message, ok);
             });
+    connect(m_controller, &KeyboardController::gifUploaded, this,
+            [this](bool ok, const QString &message) {
+                m_toast->showMessage(message, ok);
+            });
     connect(m_controller, &KeyboardController::clockSynced, this,
             [this](bool ok, const QString &message) {
                 m_toast->showMessage(message, ok);
@@ -331,6 +336,7 @@ void MainWindow::buildUi()
     m_stack = new QStackedWidget;
     m_stack->addWidget(new LightPage(m_controller));
     m_stack->addWidget(new ClockPage(m_controller));
+    m_stack->addWidget(new GifPage(m_controller));
     m_stack->addWidget(new SystemPage(m_controller));
     m_stack->addWidget(new DevicePage(m_controller));
     m_stack->addWidget(new AboutPage);
@@ -375,6 +381,7 @@ void MainWindow::setPage(int index)
     static const QStringList titles = {
         QStringLiteral("灯光控制"),
         QStringLiteral("TFT 时钟"),
+        QStringLiteral("TFT 动图"),
         QStringLiteral("系统配置"),
         QStringLiteral("设备与连接"),
         QStringLiteral("关于")
@@ -382,6 +389,7 @@ void MainWindow::setPage(int index)
     static const QStringList subtitles = {
         QStringLiteral("实时调整键盘背光，USB 与 2.4G 双通道"),
         QStringLiteral("把系统时间写入键盘 TFT 屏的 RTC"),
+        QStringLiteral("把 GIF 动画写进键盘的 TFT 屏"),
         QStringLiteral("按键响应、休眠时间与禁用组合键"),
         QStringLiteral("查看 HID 接口、连接方式与权限"),
         QStringLiteral("版本信息、协议摘要与功能进度")

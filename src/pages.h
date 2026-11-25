@@ -11,7 +11,9 @@ class KeyboardController;
 class QFrame;
 class QLabel;
 class QLineEdit;
+class QMovie;
 class QPlainTextEdit;
+class QProgressBar;
 class QPushButton;
 class QSegmentedControl;
 class QTimer;
@@ -90,6 +92,29 @@ private:
     QLabel *m_status = nullptr;
     QPushButton *m_syncButton = nullptr;
     QTimer *m_timer = nullptr;
+};
+
+class GifPage : public PageScroll {
+public:
+    explicit GifPage(KeyboardController *controller, QWidget *parent = nullptr);
+
+private:
+    void buildUi();
+    void chooseFile();
+    void loadPreview();
+    void upload();
+    void refreshAvailability();
+
+    KeyboardController *m_controller = nullptr;
+    QLabel *m_preview = nullptr;
+    QLabel *m_fileLabel = nullptr;
+    QLabel *m_infoLabel = nullptr;
+    QLabel *m_availability = nullptr;
+    QPushButton *m_choose = nullptr;
+    QPushButton *m_upload = nullptr;
+    QProgressBar *m_progress = nullptr;
+    QMovie *m_movie = nullptr;
+    QString m_path;
 };
 
 class SystemPage : public PageScroll {
